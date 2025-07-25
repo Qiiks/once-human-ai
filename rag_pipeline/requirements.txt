@@ -1,0 +1,7 @@
+unstructured
+chromadb
+sentence-transformers
+numpy
+python-dotenv
+flask
+flask-cors
