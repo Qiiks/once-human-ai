@@ -87,27 +87,38 @@ def extract_entities(text):
 def gemini_structure_data(raw_text):
     """Uses Gemini to extract structured data from raw text."""
     model = genai.GenerativeModel('gemini-2.5-flash')
-    prompt = f"""Given the following raw text about a game entity (item, weapon, armor, location, event, character, guide, lore, etc.) from Once Human, extract the following information into a JSON object. If a field is not present or not applicable, use null. Do not include any other text or formatting outside the JSON.
+    prompt = f"""Given the following raw text about an entity from the game Once Human, extract the most relevant information into a JSON object. Prioritize the categories provided: 'deviant', 'weapon', 'armor_set', 'key_gear', 'weapon_mod', 'armor_mod', 'food', 'food_buff'. If a field is not present or not applicable, use null. Do not include any other text or formatting outside the JSON.
 
-    Expected JSON format:
+    Expected JSON format (choose the most appropriate 'entity_type' and fill relevant fields):
     {{
-        "entity_name": "string",
-        "entity_type": "string" (e.g., "weapon", "armor", "food", "mod", "material", "location", "event", "character", "guide", "lore"),
-        "description": "string",
-        "effects": ["string"],
+        "entity_name": "string" (e.g., "Alpha Deviant", "KVD Icebreaker", "Raid Armor Set", "Blaze Blessing", "Spicy Stir-fry"),
+        "entity_type": "string" (must be one of: "deviant", "weapon", "armor_set", "key_gear", "weapon_mod", "armor_mod", "food", "food_buff", or "general" if none apply),
+        "description": "string" (A brief summary of the entity),
+        "effects": ["string"] (List of effects, benefits, or properties),
         "stats": {{
-            "percentages": ["string"],
-            "numbers": ["string"],
-            "durations": ["string"]
+            "percentages": ["string"] (e.g., "+10% Damage", "-5% Cooldown"),
+            "numbers": ["string"] (e.g., "200 HP", "50 Defense"),
+            "durations": ["string"] (e.g., "30 min", "2 hours")
         }},
         "acquisition_method": "string" (e.g., "Crafted using X, Y, Z", "Found in location A", "Dropped by enemy B", "Purchased from vendor C"),
-        "duration": "string" (e.g., "30 min", "24 hours", "Permanent"),
-        "related_entities": ["string"],
-        "notes": "string"
+        "duration": "string" (e.g., "30 min", "24 hours", "Permanent" - specifically for buffs or temporary items),
+        "related_entities": ["string"] (Other entities mentioned or related to this one, e.g., specific weapons for a mod, specific armor pieces for a set, enemies for a weapon),
+        "notes": "string" (Any other important or miscellaneous information)
     }}
 
     Raw Text: '''{raw_text}'''
     """
+    import datetime
+    import os
+
+    log_dir = "gemini_inputs_log"
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    log_filename = os.path.join(log_dir, f"gemini_input_{timestamp}.txt")
+    with open(log_filename, "w", encoding="utf-8") as f:
+        f.write(raw_text)
+    print(f"Saved Gemini input to {log_filename}")
+
     try:
         response = model.generate_content(prompt)
         raw_response_text = response.text.strip()
