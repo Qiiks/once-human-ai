@@ -13,8 +13,14 @@ module.exports = {
 
         const assignedChannelId = client.config.channelId;
         const channelId = message.channel.id;
-        const isValidCommand = channelId === assignedChannelId || 
-                             message.content.toLowerCase().startsWith('!oh') || 
+
+        // Ignore messages starting with '!' in the auto-reply channel, unless it's a command for this bot.
+        if (channelId === assignedChannelId && message.content.startsWith('!') && !message.content.toLowerCase().startsWith('!oh')) {
+            return;
+        }
+        
+        const isValidCommand = channelId === assignedChannelId ||
+                             message.content.toLowerCase().startsWith('!oh') ||
                              message.content.startsWith('OH');
         
         // Only process commands meant for the bot

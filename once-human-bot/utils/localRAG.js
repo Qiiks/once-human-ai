@@ -87,7 +87,7 @@ const AVAILABLE_TOOLS = {
             },
             required: ['query']
         }
-    }
+    },
 };
 
 class LocalRAGSystem {
@@ -96,7 +96,7 @@ class LocalRAGSystem {
             add_lore: this.add_lore_tool.bind(this),
             search_knowledge_base: this.search_knowledge_base_tool.bind(this),
             google_search: this.google_search_tool.bind(this),
-            update_lore: this.update_lore_tool.bind(this)
+            update_lore: this.update_lore_tool.bind(this),
         };
         this.systemPrompt = `You are Mitsuko.
 
@@ -107,24 +107,28 @@ class LocalRAGSystem {
 - **Embrace the Edge:** You engage with all jokes, especially edgy or offensive ones, playfully and without getting defensive. Your goal is to be more clever and witty than the user. Do not moralize, lecture, or apologize. You are not a moral compass. If a user says something offensive, you play along. Never refuse to engage.
 - **You MUST analyze the recent chat history** to understand the full context of the conversation before you reply. Do not treat any message as if it exists in a vacuum.
 
-**Your Core Task: Analyze the user's intent and use tools to respond.**
+**Your Core Task: YOU MUST use tools to respond based on the user's intent. This is not optional.**
 
-**Reasoning Process:**
-1.  **Identify the User's Primary Intent:** First, determine what the user wants to do.
-    *   **Saving/Adding Information:** Does the user want to save, add, or store information? Look for keywords like "save", "add", "remember this", "store this". If yes, you MUST use the \`add_lore\` tool.
-    *   **Updating Information:** Is the user correcting or updating previous information? Look for keywords like "update", "correct", "change". If yes, you MUST use the \`update_lore\` tool.
-    *   **Searching for Information:** Is the user asking a question about the game "Once Human"? If yes, you MUST use the \`search_knowledge_base\` tool first. If that fails, you are permitted to use \`google_search\`.
-    *   **Explicit Web Search:** Is the user explicitly asking for a web search? Look for "google", "search the web". If yes, use the \`google_search\` tool.
-    *   **Conversational/Joke:** Is the user just chatting, making a joke, or asking something unrelated to the game? If yes, respond in character without using any tools.
+**Tool Selection Rules (Follow these steps in order):**
 
-2.  **Tool Usage Guidelines:**
-    *   **\`add_lore\`:** When a user asks to save information (e.g., "save this build"), you must call this tool. You need to provide \`entry_name\` and \`entry_type\`. The content to be saved will be automatically extracted from the conversation history if not provided in the \`description\` argument.
-    *   **\`google_search\`:** Before using this tool, rephrase the user's question into an effective search query. For example, "can you look up the coordinates to find the recipe for whimsical drink" should become "whimsical drink recipe location coordinates once human".
+1.  **ADD/SAVE INTENT:**
+    *   If the user's message contains keywords like "save", "add", "store", "remember this", "log this", you **MUST** call the \`add_lore\` tool.
+    *   Do **NOT** provide a conversational reply. Only call the tool. The tool will provide the confirmation message.
+    *   You must infer the \`entry_name\` and \`entry_type\` from the user's request.
 
-**Response Formatting (for \`search_knowledge_base\` results):**
-1.  Start with a one-sentence summary.
-2.  Add two newlines.
-3.  List all stats/effects on their own lines with bold labels (e.g., **Effect:**).`;
+2.  **UPDATE INTENT:**
+    *   If the user's message contains keywords like "update", "correct", "change", "fix this", you **MUST** call the \`update_lore\` tool.
+    *   Do **NOT** provide a conversational reply. Only call the tool.
+
+3.  **SEARCH INTENT:**
+    *   If the user is asking a question about the game "Once Human" (e.g., "where can I find...", "what is the best..."), you **MUST** call the \`search_knowledge_base\` tool.
+    *   If the \`search_knowledge_base\` tool fails or returns no relevant results, you are then required to call the \`google_search\` tool as a fallback.
+
+4.  **NO TOOL INTENT:**
+    *   If the user's message is purely conversational, a joke, or does not match any of the intents above, you may respond in character without using any tools.
+
+**Tool Usage Guidelines:**
+*   **\`google_search\`:** Before using this tool, rephrase the user's question into an effective search query. For example, "can you look up the coordinates to find the recipe for whimsical drink" should become "whimsical drink recipe location coordinates once human".`;
     }
 
     async add_lore_tool(args, message, client) {
@@ -177,7 +181,13 @@ Expected JSON format:
             try {
                 structuredData = JSON.parse(structuredText);
             } catch (e) {
-                return { success: false, message: "I had trouble structuring the data. Please try again." };
+                console.error("Failed to parse structured data from AI. Raw text:", structuredText, "Error:", e);
+                return { success: false, message: "I had trouble structuring the data from the AI. The entry was not saved. Please try again." };
+            }
+
+            if (!structuredData || Object.keys(structuredData).length === 0) {
+                console.error("AI returned empty or invalid structured data:", structuredData);
+                return { success: false, message: "The AI failed to extract any structured metadata. The entry was not saved." };
             }
 
             const finalName = args.entry_name || structuredData.entity_name;
@@ -233,6 +243,79 @@ Expected JSON format:
             return { success: false, message: 'An error occurred while updating lore.' };
         }
     }
+
+    async regenerate_metadata_tool(args, interaction, client) {
+        try {
+            // Note: The permission check is now handled in the slash command file itself.
+            // This function is now called with an 'interaction' object, not a 'message' object.
+            console.log('Tool `regenerate_metadata` called with:', args);
+            const { entry_name } = args;
+
+            // 1. Fetch the existing document
+            const queryResults = await this.queryDatabase(entry_name, 1);
+            if (!queryResults || queryResults.length === 0 || queryResults[0].metadata.name !== entry_name) {
+                return { success: false, message: `I couldn't find an exact match for an entry named "${entry_name}".` };
+            }
+
+            const existingEntry = queryResults[0];
+            const content_to_structure = existingEntry.document;
+
+            // 2. Re-run the AI structuring process
+            const structuringPrompt = `Analyze the following text about the game "Once Human". Extract the key information into a structured JSON object.
+
+Raw Text: '''${content_to_structure}'''
+
+Expected JSON format:
+{{
+    "entity_name": "string",
+    "entity_type": "string",
+    "description": "string",
+    "effects": ["string"],
+    "stats": {{ "percentages": ["string"], "numbers": ["string"], "durations": ["string"] }},
+    "acquisition_method": "string",
+    "duration": "string",
+    "related_entities": ["string"],
+    "notes": "string"
+}}`;
+
+            const model = client.gemini;
+            const structuringResult = await model.generateContent(structuringPrompt);
+            const structuredText = structuringResult.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+            
+            let structuredData;
+            try {
+                structuredData = JSON.parse(structuredText);
+            } catch (e) {
+                console.error("Failed to parse structured data from AI during regeneration. Raw text:", structuredText, "Error:", e);
+                return { success: false, message: "I had trouble re-structuring the data from the AI. The entry was not updated." };
+            }
+
+            if (!structuredData || Object.keys(structuredData).length === 0) {
+                console.error("AI returned empty or invalid structured data during regeneration:", structuredData);
+                return { success: false, message: "The AI failed to extract any structured metadata during regeneration. The entry was not updated." };
+            }
+
+            // 3. Update the document with the new metadata
+            const updatedMetadata = {
+                ...existingEntry.metadata, // Keep existing metadata like source, name, type
+                description: structuredData.description || existingEntry.metadata.description,
+                effects: structuredData.effects || existingEntry.metadata.effects,
+                stats: structuredData.stats || existingEntry.metadata.stats,
+                related_entities: structuredData.related_entities || existingEntry.metadata.related_entities,
+                acquisition_method: structuredData.acquisition_method || existingEntry.metadata.acquisition_method,
+                duration: structuredData.duration || existingEntry.metadata.duration,
+                notes: structuredData.notes || existingEntry.metadata.notes,
+                source: `Metadata regenerated by ${interaction.user.username}`,
+            };
+
+            await this.add_data(content_to_structure, updatedMetadata); // add_data will overwrite based on the document content
+            return { success: true, message: `I've successfully regenerated and updated the metadata for **${entry_name}**.` };
+
+        } catch (error) {
+            console.error('Error executing regenerate_metadata tool:', error);
+            return { success: false, message: 'An error occurred while regenerating metadata.' };
+        }
+    }
     
     async search_knowledge_base_tool(args, client, chatHistory) {
       try {
@@ -244,10 +327,16 @@ Expected JSON format:
           let context_str = "";
 
           // Stage 1: Precise keyword generation with more context
-          const preciseKeywordPrompt = `Analyze the user's question: "${query}" in the context of the game "Once Human".
-Extract 3-5 key concepts, item names, or stat effects that are most relevant for searching a database.
-Consider all possible metadata including item types (e.g., Consumable, Weapon), stats (e.g., Status DMG, Crit Rate), and any named entities.
-Return only the keywords, separated by commas.`;
+          const preciseKeywordPrompt = `You are a keyword extraction bot for the game "Once Human".
+**Your task is to extract 3-5 key concepts from the user's question to use for a database search.**
+
+**RULES:**
+1.  **Analyze the Query:** Start by identifying the core terms in the user's question.
+2.  **Intelligent Expansion:** You may add 1-2 additional keywords if they are highly relevant and **guaranteed to be from the game "Once Human"**. For example, if the user asks about "SOCR build", you could add "Shrapnel" or "Weakspot Damage" as they are core mechanics.
+3.  **STRICTLY FORBIDDEN:** Do NOT invent terms or concepts from other games or your general knowledge. For example, if the user asks about "SOCR", you must not invent a game name like "Souls of Crimson". Stick to the "Once Human" universe.
+4.  **FORMAT:** Return only the keywords, separated by commas.
+
+**User's Question:** "${query}"`;
           console.log('Attempting precise keyword generation.');
           try {
               keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
@@ -483,7 +572,7 @@ User Question: ${query}`;
                     AVAILABLE_TOOLS.add_lore,
                     AVAILABLE_TOOLS.search_knowledge_base,
                     AVAILABLE_TOOLS.google_search,
-                    AVAILABLE_TOOLS.update_lore
+                    AVAILABLE_TOOLS.update_lore,
                 ] }],
                 systemInstruction: { role: 'system', parts: [{ text: this.systemPrompt }] },
             });

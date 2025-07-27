@@ -1,0 +1,27 @@
+# Ignore node_modules directories
+**/node_modules
+
+# Ignore Python virtual environments
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore logs and local databases
+*.log
+chroma_db/
+rag_pipeline/gemini_inputs_log/
+
+# Ignore Git directory
+.git
+.gitignore
+
+# Ignore local environment files
+.env

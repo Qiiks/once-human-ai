@@ -2,8 +2,8 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
-const { Pinecone } = require('@pinecone-database/pinecone');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { LocalRAGSystem } = require('./utils/localRAG');
 
 
 // Initialize Discord Client
@@ -18,11 +18,6 @@ const client = new Client({
 // Load structured data
 client.gameEntities = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'rag_pipeline', 'game_entities.json'), 'utf8'));
 
-// Initialize Pinecone
-const pinecone = new Pinecone({
-    apiKey: process.env.PINECONE_API_KEY,
-});
-client.pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
 // Initialize Google Generative AI
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
@@ -31,6 +26,8 @@ client.gemini = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 client.geminiFallback = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 client.embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' }); // Initialize embedding model
 
+// Initialize the RAG System and attach it to the client
+client.ragSystem = new LocalRAGSystem();
 
 // Command and Event Handlers
 client.commands = new Collection();

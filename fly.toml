@@ -1,0 +1,26 @@
+# fly.toml file generated for your app
+
+app = "once-human-bot-and-rag" # You can change this to your preferred app name
+primary_region = "sin" # Example region, choose one close to you or your users
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0 # Set to 1 for continuous operation
+
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
+
+[[mounts]]
+  source = "chroma_data"
+  destination = "/data"

@@ -1,4 +1,7 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file, after_this_request
+import shutil
+import os
+import tempfile
 from flask_cors import CORS
 import chromadb
 from chromadb.utils import embedding_functions
@@ -17,7 +20,7 @@ CORS(app)  # Enable CORS for all routes
 app = Flask(__name__)
 
 # Initialize ChromaDB
-client = chromadb.PersistentClient(path="./chroma_db")
+client = chromadb.PersistentClient(path="/data/chroma_db")
 embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
     model_name="all-MiniLM-L6-v2"
 )
@@ -198,5 +201,43 @@ def delete_from_database():
             'success': False,
             'error': str(e)
         }), 500
+@app.route('/backup', methods=['GET'])
+def backup_database():
+    try:
+        logger.info("Received backup request")
+        db_path = "/data/chroma_db"
+        
+        if not os.path.exists(db_path):
+            return jsonify({'success': False, 'error': 'Database directory not found.'}), 404
+
+        # Create a temporary file to store the archive
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+            archive_path = tmp_file.name
+        
+        # Create the zip archive
+        shutil.make_archive(archive_path.replace('.zip', ''), 'zip', db_path)
+        
+        logger.info(f"Successfully created backup archive at {archive_path}")
+
+        # Send the file and schedule it for deletion
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(archive_path)
+                logger.info(f"Successfully cleaned up temporary backup file: {archive_path}")
+            except Exception as e:
+                logger.error(f"Error cleaning up temporary backup file {archive_path}: {e}")
+            return response
+
+        return send_file(archive_path, as_attachment=True, download_name='chroma_db_backup.zip')
+
+    except Exception as e:
+        logger.error(f"Error creating backup: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     app.run(port=5000)
