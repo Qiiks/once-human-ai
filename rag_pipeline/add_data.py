@@ -94,13 +94,13 @@ def gemini_structure_data(raw_text):
         "entity_name": "string" (e.g., "Alpha Deviant", "KVD Icebreaker", "Raid Armor Set", "Blaze Blessing", "Spicy Stir-fry"),
         "entity_type": "string" (must be one of: "deviant", "weapon", "armor_set", "key_gear", "weapon_mod", "armor_mod", "food", "food_buff", or "general" if none apply),
         "description": "string" (A brief summary of the entity),
-        "effects": ["string"] (List of effects, benefits, or properties),
+        "effects": ["string"] (List of effects, benefits, or properties. For food, this could be 'Restores Health' or 'Increases Stamina Regen by 10%'),
         "stats": {{
             "percentages": ["string"] (e.g., "+10% Damage", "-5% Cooldown"),
             "numbers": ["string"] (e.g., "200 HP", "50 Defense"),
             "durations": ["string"] (e.g., "30 min", "2 hours")
         }},
-        "acquisition_method": "string" (e.g., "Crafted using X, Y, Z", "Found in location A", "Dropped by enemy B", "Purchased from vendor C"),
+        "acquisition_method": "string" (e.g., "Crafted using X, Y, Z", "Found in location A", "Dropped by enemy B", "Purchased from vendor C". For food, list ingredients and cooking station.),
         "duration": "string" (e.g., "30 min", "24 hours", "Permanent" - specifically for buffs or temporary items),
         "related_entities": ["string"] (Other entities mentioned or related to this one, e.g., specific weapons for a mod, specific armor pieces for a set, enemies for a weapon),
         "notes": "string" (Any other important or miscellaneous information)

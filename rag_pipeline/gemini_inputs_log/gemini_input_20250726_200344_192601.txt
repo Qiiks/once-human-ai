@@ -1,0 +1,7 @@
+Type: Pistol ○ Rarity: Common ○ Stage/Role: Early Game ○ Base Stats: Damage: 102, Fire Rate: 190, Magazine: 7 ○ Key Feature/Perk: Minimal recoil, effective at limited range 7
+
+MPS7:
+
+Type: SMG ○ Rarity: Common ○ Stage/Role: Early Game ○ Base Stats: Damage: 26, Fire Rate: 850, Magazine: 35 ○ Key Feature/Perk: High fire rate and mobility, good for close-range 7
+
+SN700:

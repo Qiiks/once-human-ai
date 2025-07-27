@@ -23,6 +23,11 @@ module.exports = {
         config.channelId = channel.id;
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-        await interaction.reply(`Auto-reply channel has been set to ${channel}.`);
+        // --- FIX: Update the live config in memory ---
+        interaction.client.config.channelId = channel.id;
+        console.log(`[Config] Live channel ID updated to: ${channel.id}`);
+        // --- End of Fix ---
+
+        await interaction.reply(`Auto-reply channel has been set to ${channel}. The change is effective immediately.`);
     },
 };

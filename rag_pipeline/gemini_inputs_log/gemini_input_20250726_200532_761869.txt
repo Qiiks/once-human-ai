@@ -1,0 +1,3 @@
+■ Blackstone Set: Similar to Shelter for elemental builds. Two pieces increase
+
+elemental damage by 8%. Three pieces grant 1 stack of Deviant Energy per weapon hit. Four pieces increase the maximum stack of Deviant Energy by 10 (total 20 stacks, +20% elemental damage).17

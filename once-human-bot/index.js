@@ -5,6 +5,7 @@ const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+
 // Initialize Discord Client
 const client = new Client({
     intents: [
@@ -25,9 +26,11 @@ client.pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
 // Initialize Google Generative AI
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-client.gemini = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-client.geminiFallback = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+client.genAI = genAI; // Attach the main AI instance to the client
+client.gemini = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+client.geminiFallback = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 client.embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' }); // Initialize embedding model
+
 
 // Command and Event Handlers
 client.commands = new Collection();

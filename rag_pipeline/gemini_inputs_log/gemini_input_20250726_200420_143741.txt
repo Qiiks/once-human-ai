@@ -1,0 +1,11 @@
+Type: Shotgun ○ Key Feature/Perk: Fortress Warfare build, high weapon damage 46
+
+DBSG - Doombringer:
+
+Type: Shotgun ○ Key Feature/Perk: Bullseye effect, high physical damage at close range 47
+
+G17 - Hazardous Object: ○ Type: Pistol ○ Key Feature/Perk: Unstable Bomber, high AoE blast damage 48
+
+HAMR - Brahminy:
+
+Type: LMG ○ Key Feature/Perk: Single-target LMG, pairs with Lonewolf's Whisper 50

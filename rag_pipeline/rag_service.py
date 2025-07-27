@@ -1,10 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import chromadb
 from chromadb.utils import embedding_functions
 import json
 import logging
 import traceback
+import uuid
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -96,5 +97,106 @@ def query_database():
             'error': str(e)
         }), 500
 
+@app.route('/add', methods=['POST'])
+def add_to_database():
+    try:
+        logger.info("Received add request")
+        data = request.json
+        document = data.get('document')
+        metadata = data.get('metadata')
+
+        if not document or not metadata:
+            return jsonify({'success': False, 'error': 'Missing document or metadata'}), 400
+
+        # Generate a unique ID
+        doc_id = str(uuid.uuid4())
+
+        # Process metadata to be ChromaDB compatible
+        processed_metadata = {}
+        for key, value in metadata.items():
+            if isinstance(value, list):
+                processed_metadata[key] = '; '.join(map(str, value))
+            elif isinstance(value, dict):
+                processed_metadata[key] = json.dumps(value)
+            else:
+                processed_metadata[key] = value
+        
+        # Add "verified" flag
+        processed_metadata['verified'] = True
+
+
+        # Add to collection
+        collection.add(
+            documents=[document],
+            metadatas=[processed_metadata],
+            ids=[doc_id]
+        )
+
+        logger.info(f"Successfully added document with ID: {doc_id}")
+        return jsonify({'success': True, 'id': doc_id})
+
+    except Exception as e:
+        logger.error(f"Error adding document: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
+@app.route('/documents', methods=['GET'])
+def get_all_documents():
+    try:
+        logger.info("Received request to get all documents")
+        
+        # Retrieve all documents from the collection
+        results = collection.get()
+        
+        # Format the response
+        formatted_results = []
+        for i in range(len(results['ids'])):
+            formatted_results.append({
+                'id': results['ids'][i],
+                'document': results['documents'][i],
+                'metadata': results['metadatas'][i]
+            })
+            
+        return jsonify({
+            'success': True,
+            'documents': formatted_results
+        })
+    except Exception as e:
+        logger.error(f"Error getting all documents: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/delete', methods=['POST'])
+def delete_from_database():
+    try:
+        logger.info("Received delete request")
+        data = request.json
+        doc_id = data.get('id')
+
+        if not doc_id:
+            return jsonify({'success': False, 'error': 'Missing document id'}), 400
+
+        # Delete from collection
+        collection.delete(ids=[doc_id])
+
+        logger.info(f"Successfully deleted document with ID: {doc_id}")
+        return jsonify({'success': True, 'id': doc_id})
+
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 if __name__ == '__main__':
     app.run(port=5000)

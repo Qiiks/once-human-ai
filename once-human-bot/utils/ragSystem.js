@@ -1,8 +1,15 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
+const fs = require('fs').promises;
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
-async function retrieveAndGenerate(query, chatHistory, pineconeIndex, gemini, embeddingModel, geminiFallback, gameEntities) {
+// This file is now a placeholder and contains the legacy RAG system.
+// The primary logic has been moved to localRAG.js to support AI-driven tool calling.
+
+async function retrieveAndGenerate(query, chatHistory, pineconeIndex, gemini, embeddingModel, geminiFallback, gameEntities, client) {
     try {
         console.log('RAG system: retrieveAndGenerate function called.');
+        console.log('Query:', query);
         const index = pineconeIndex;
 
         console.log('RAG system: Querying Pinecone index with query:', query);
@@ -25,7 +32,7 @@ async function retrieveAndGenerate(query, chatHistory, pineconeIndex, gemini, em
         }
 
         // Stage 1: Precise keyword generation
-        const preciseKeywordPrompt = `Given the user question: "${query}", and the following game entities from Once Human: Weapons: ${gameEntities.weapons.join(', ')}, Armor Sets: ${gameEntities.armor_sets.join(', ')}, Key Gear: ${gameEntities.key_gear.join(', ')}, Weapon Mods: ${gameEntities.weapon_mods.join(', ')}, Armor Mods: ${gameEntities.armor_mods.join(', ')}. Extract 3-5 precise keywords that are directly related to these entities or the user's query within the context of the game Once Human. Return only the keywords, separated by commas.`;
+        const preciseKeywordPrompt = `Given the user question: "${query}", and the following game entities from Once Human: Weapons: ${gameEntities.weapons ? gameEntities.weapons.join(', ') : 'N/A'}, Armor Sets: ${gameEntities.armor_sets ? gameEntities.armor_sets.join(', ') : 'N/A'}, Key Gear: ${gameEntities.key_gear ? gameEntities.key_gear.join(', ') : 'N/A'}, Weapon Mods: ${gameEntities.weapon_mods ? gameEntities.weapon_mods.join(', ') : 'N/A'}, Armor Mods: ${gameEntities.armor_mods ? gameEntities.armor_mods.join(', ') : 'N/A'}. Extract 3-5 precise keywords that are directly related to these entities or the user's query within the context of the game Once Human. Return only the keywords, separated by commas.`;
         console.log('RAG system: Attempting precise keyword generation.');
         try {
             keywords = await generateKeywords(preciseKeywordPrompt, gemini);
@@ -42,7 +49,7 @@ async function retrieveAndGenerate(query, chatHistory, pineconeIndex, gemini, em
             const queryVector = embeddingResult.embedding.values;
             const queryResult = await index.query({ topK: 10, vector: queryVector, includeMetadata: true, includeValues: false });
             if (queryResult.matches.length > 0) {
-                context_str = queryResult.matches.map(match => match.metadata.text).join("\n---\n");
+                context_str = queryResult.matches.map(match => match.metadata.text || match.metadata.description).join("\n---\n");
                 console.log('RAG system: Context found with precise keywords.');
             }
         }
@@ -66,7 +73,7 @@ async function retrieveAndGenerate(query, chatHistory, pineconeIndex, gemini, em
                 const queryVector = embeddingResult.embedding.values;
                 const queryResult = await index.query({ topK: 10, vector: queryVector, includeMetadata: true, includeValues: false });
                 if (queryResult.matches.length > 0) {
-                    context_str = queryResult.matches.map(match => match.metadata.text).join("\n---\n");
+                    context_str = queryResult.matches.map(match => match.metadata.text || match.metadata.description).join("\n---\n");
                     console.log('RAG system: Context found with broader keywords.');
                 }
             }
@@ -154,4 +161,6 @@ Please feel free to ask another question, and I'll do my best to help with the i
     }
 }
 
-module.exports = { retrieveAndGenerate };
+module.exports = {
+    retrieveAndGenerate
+};
