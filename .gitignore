@@ -18,7 +18,9 @@ __pycache__/
 .vscode/
 
 #ChromaDB
-/chroma_db
+# If the chroma_db directory is already tracked by git, run the following command
+# to remove it from the index: git rm -r --cached rag_pipeline/chroma_db/
+/rag_pipeline/chroma_db/
 
 # Logs
 *.log
