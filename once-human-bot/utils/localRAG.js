@@ -447,7 +447,7 @@ Return a comma-separated list of keywords.`;
 1.  **Analyze the Context:** First, carefully read the user's question and the provided context. The context is from a database and may be messy, incomplete, or contain conflicting information.
 2.  **Assess Confidence:** Based on the context, decide if you can form a confident and accurate answer.
 3.  **Generate Answer OR Bail Out:**
-    *   **If you are confident,** answer the user's question by summarizing the information into a clear, well-formatted guide. Use Markdown headings, subheadings, and bullet points. Start with a witty, in-character sentence.
+    *   **If you are confident,** answer the user's question by summarizing the information into a clear, well-formatted guide. Use Markdown headings (up to level 3, e.g., ###), subheadings, and bullet points. Start with a witty, in-character sentence.
     *   **If the context is completely irrelevant,** you MUST respond with the single, specific string: \`NO_RELEVANT_INFO_FOUND\` and nothing else.
     *   **If the context is relevant but you are unsure about its accuracy or completeness,** generate the best answer you can, but end your response with the special string: \`NEEDS_VERIFICATION\`.
 

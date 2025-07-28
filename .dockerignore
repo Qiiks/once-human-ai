@@ -21,8 +21,7 @@ Thumbs.db
 
 # Ignore logs and local databases
 *.log
-chroma_db/
-rag_pipeline/gemini_inputs_log/
+/rag_pipeline/chroma_db/
 
 # Ignore asset directories
 OncehumanPDFs/
@@ -33,3 +32,8 @@ OncehumanPDFs/
 
 # Ignore local environment files
 .env
+rag_pipeline/chroma_db.zip
+rag_pipeline/backupppp/
+rag_pipeline/rag_pipeline/backups/
+fly.toml
+once-human-bot/config/channelConfig.json
