@@ -628,19 +628,43 @@ ${answerToVerify}
         }
     }
 
+    async generateWithRetry(model, prompt, isChat = false, chatHistory = []) {
+        const keyManager = require('./keyManager');
+        const totalKeys = keyManager.keys.length;
+
+        for (let i = 0; i < totalKeys; i++) {
+            try {
+                if (isChat) {
+                    const chat = model.startChat({ history: chatHistory });
+                    const result = await chat.sendMessage(prompt);
+                    return result;
+                } else {
+                    const result = await model.generateContent(prompt);
+                    return result;
+                }
+            } catch (error) {
+                if (error.message.includes('429') || (error.response && error.response.status === 429)) {
+                    console.warn(`API key ${keyManager.currentIndex} failed with 429. Rotating to next key.`);
+                    keyManager.nextKey;
+                    model = keyManager.aI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
+                } else {
+                    console.error('An unhandled error occurred during content generation:', error);
+                    throw error;
+                }
+            }
+        }
+        throw new Error('All API keys failed with 429 Too Many Requests.');
+    }
+
     async retrieveAndGenerate(query, chatHistory, client, message, youtubeVideoId = null, attachmentData = null) {
         try {
             console.log('Local RAG system: retrieveAndGenerate function called.');
             
-            const model = client.gemini;
-            let isGameRelated = false; // Flag to track context for search
+            let model = client.gemini;
+            let isGameRelated = false;
 
-            // --- Multimodal Content Handling ---
             if (youtubeVideoId || attachmentData) {
-                const modelWithVision = client.genAI.getGenerativeModel({
-                    model: "gemini-2.5-flash", // A model that supports multimodal input
-                });
-
+                const modelWithVision = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
                 let multimodalQuery = query;
                 if (attachmentData) {
                     multimodalQuery = `(You are Mitsuko. Analyze this image and respond in your usual fun, witty, and slightly edgy persona. Be concise unless the user asks for a detailed breakdown.)\n\n${query}`;
@@ -648,27 +672,18 @@ ${answerToVerify}
                 const contentParts = [multimodalQuery];
 
                 if (youtubeVideoId) {
-                    console.log(`YouTube video detected. Analyzing video ID: ${youtubeVideoId}`);
                     const youtubeUrl = `https://www.youtube.com/watch?v=${youtubeVideoId}`;
                     contentParts.push({ fileData: { mimeType: "video/youtube", fileUri: youtubeUrl } });
                 }
 
                 if (attachmentData) {
-                    console.log(`Attachment detected. Analyzing buffer for MIME type: ${attachmentData.mimeType}`);
-                    contentParts.push({
-                        inlineData: {
-                            data: attachmentData.buffer.toString('base64'),
-                            mimeType: attachmentData.mimeType
-                        }
-                    });
+                    contentParts.push({ inlineData: { data: attachmentData.buffer.toString('base64'), mimeType: attachmentData.mimeType } });
                 }
 
-                const result = await modelWithVision.generateContent(contentParts);
+                const result = await this.generateWithRetry(modelWithVision, contentParts);
                 return result.response.text();
             }
-            // --- End of New Logic ---
 
-            // Step 1: Check for custom tool usage first
             const customToolChat = model.startChat({
                 history: chatHistory,
                 tools: [{ functionDeclarations: [
@@ -680,30 +695,22 @@ ${answerToVerify}
                 systemInstruction: { role: 'system', parts: [{ text: this.systemPrompt }] },
             });
 
-            const customToolResult = await customToolChat.sendMessage(query);
+            const customToolResult = await this.generateWithRetry(customToolChat, query, true, chatHistory);
             const customToolResponse = customToolResult.response;
             const customToolCalls = customToolResponse.functionCalls();
 
             if (customToolCalls && customToolCalls.length > 0) {
-                console.log(`Gemini requested ${customToolCalls.length} tool call(s).`);
-
                 const toolPromises = customToolCalls.map(async (call) => {
-                    console.log(`Executing tool: ${call.name}`);
                     let toolResult;
                     switch (call.name) {
                         case 'search_knowledge_base':
                             isGameRelated = true;
-                            // **New Logic: Check if the query is about a build**
                             if (isBuildQuery(query)) {
-                                console.log('Build query detected. Web search will be disabled.');
-                                // For build queries, call the RAG tool but never fall back to a web search.
-                                const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, true); // Pass 'disableWebSearch=true'
+                                const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, true);
                                 return { name: call.name, response: ragResult };
                             } else {
-                                // For all other queries, proceed with the standard RAG search that can fall back to the web.
                                 const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, false);
-                                 if (!ragResult.success || (ragResult.answer && ragResult.answer.includes('NEEDS_VERIFICATION'))) {
-                                    console.log('RAG search was inconclusive for a non-build query. Escalating to web search.');
+                                if (!ragResult.success || (ragResult.answer && ragResult.answer.includes('NEEDS_VERIFICATION'))) {
                                     const fallbackResult = await this.tools.google_search(call.args, client);
                                     return { name: call.name, response: fallbackResult };
                                 }
@@ -719,24 +726,18 @@ ${answerToVerify}
                             toolResult = await this.tools.update_lore(call.args, message, client);
                             return { name: call.name, response: toolResult };
                         default:
-                            console.log(`Unknown tool call: ${call.name}`);
                             return { name: call.name, response: { success: false, message: 'Unknown tool.' } };
                     }
                 });
 
                 const toolResponses = await Promise.all(toolPromises);
-                const finalResponse = await customToolChat.sendMessage(
-                    toolResponses.map(toolResponse => ({ functionResponse: toolResponse }))
-                );
-                return finalResponse.response.text();
+                const finalResponseResult = await this.generateWithRetry(customToolChat, toolResponses.map(toolResponse => ({ functionResponse: toolResponse })), true, chatHistory);
+                return finalResponseResult.response.text();
             } else if (customToolResponse.text()) {
-                // Handle direct conversational response based on the new, detailed system prompt
-                console.log('AI provided a direct conversational response.');
                 return customToolResponse.text();
             }
  
-
-            return "I'm not sure how to respond to that. Could you try rephrasing?"; // Safe fallback
+            return "I'm not sure how to respond to that. Could you try rephrasing?";
         } catch (error) {
             console.error('Error in Local RAG system:', error);
             throw new Error('Failed to retrieve and generate response.');
