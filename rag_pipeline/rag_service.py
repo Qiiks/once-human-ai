@@ -99,6 +99,7 @@ def query_database():
                     processed_metadata[key] = value
             
             formatted_results.append({
+                'id': results['ids'][0][i],
                 'document': results['documents'][0][i],
                 'metadata': processed_metadata,
                 'distance': float(results['distances'][0][i])
@@ -210,6 +211,35 @@ def delete_from_database():
 
     except Exception as e:
         logger.error(f"Error deleting document: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+@app.route('/update', methods=['POST'])
+def update_database():
+    try:
+        logger.info("Received update request")
+        data = request.json
+        doc_id = data.get('id')
+        document = data.get('document')
+        metadata = data.get('metadata')
+
+        if not all([doc_id, document, metadata]):
+            return jsonify({'success': False, 'error': 'Missing id, document, or metadata'}), 400
+
+        # ChromaDB's `update` is an upsert, but we'll use it to overwrite.
+        collection.update(
+            ids=[doc_id],
+            documents=[document],
+            metadatas=[metadata]
+        )
+
+        logger.info(f"Successfully updated document with ID: {doc_id}")
+        return jsonify({'success': True, 'id': doc_id})
+
+    except Exception as e:
+        logger.error(f"Error updating document: {e}")
         logger.error(traceback.format_exc())
         return jsonify({
             'success': False,

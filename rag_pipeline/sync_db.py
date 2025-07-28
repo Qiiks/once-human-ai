@@ -1,11 +1,15 @@
 import requests
 import json
 from tqdm import tqdm
+import os
+import sys
+import datetime
 
 # --- Configuration ---
 LOCAL_URL = "http://localhost:5000"
 # IMPORTANT: Replace with your actual Fly.io app URL
-REMOTE_URL = "https://once-human-bot-and-rag.fly.dev" 
+REMOTE_URL = "https://once-human-bot-and-rag.fly.dev"
+BACKUP_DIR = "rag_pipeline/backups"
 
 def fetch_all_documents(base_url):
     """Fetches all documents from the specified RAG service."""
@@ -40,12 +44,12 @@ def add_document(base_url, document_data):
         print(f"Error adding document: {e}")
         return False
 
-def sync_databases():
+def push_to_remote():
     """
     Synchronizes the remote database with the local one by fetching all
     local documents and adding them to the remote database.
     """
-    print("--- Starting Database Sync ---")
+    print("--- Starting Push to Remote ---")
     
     # 1. Fetch all data from the local database
     local_documents = fetch_all_documents(LOCAL_URL)
@@ -65,9 +69,52 @@ def sync_databases():
             fail_count += 1
             print(f"Failed to add document ID (from local): {doc.get('id')}")
 
-    print("\n--- Sync Complete ---")
+    print("\n--- Push Complete ---")
     print(f"Successfully synced: {success_count}")
     print(f"Failed to sync: {fail_count}")
 
+def pull_from_remote():
+    """
+    Fetches the entire database from the remote server via the /backup
+    endpoint and saves it locally as a timestamped zip file.
+    """
+    print(f"--- Starting Pull from {REMOTE_URL} ---")
+    try:
+        # 1. Make the request to the /backup endpoint
+        response = requests.get(f"{REMOTE_URL}/backup", stream=True)
+        response.raise_for_status()
+
+        # 2. Create the backup directory if it doesn't exist
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+
+        # 3. Define the backup file path with a timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"remote_db_backup_{timestamp}.zip"
+        backup_filepath = os.path.join(BACKUP_DIR, backup_filename)
+
+        # 4. Save the file
+        with open(backup_filepath, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        print("\n--- Pull Complete ---")
+        print(f"Successfully saved remote database to: {backup_filepath}")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to connect to {REMOTE_URL}. Is the service running? Error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+
 if __name__ == "__main__":
-    sync_databases()
+    # Default to 'push' if no argument is provided
+    direction = "push"
+    if len(sys.argv) > 1:
+        direction = sys.argv[1].lower()
+
+    if direction == "pull":
+        pull_from_remote()
+    elif direction == "push":
+        push_to_remote() # Renamed from main() for clarity
+    else:
+        print(f"Error: Invalid argument '{direction}'. Use 'push' or 'pull'.")

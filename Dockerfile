@@ -36,19 +36,21 @@ RUN npm install --prefix ./once-human-bot
 
 # --- Application Code ---
 # Copy the rest of the application code
-# Copy the rest of the application code
 COPY . .
+
+# --- Pre-built Database ---
+# Copy your local ChromaDB data into the image. This will be used to seed
+# the persistent volume on the first launch.
+# IMPORTANT: Make sure your local DB path is correct.
+COPY ./rag_pipeline/backupppp/chroma_db /app/prebuilt_db
 
 # --- Start Services ---
 # Expose the port for the Flask API
 EXPOSE 5000
 
-# Create a startup script to run both services
-RUN echo '#!/bin/bash' > /app/start.sh && \
-    echo 'echo "--- Starting main services ---"' >> /app/start.sh && \
-    echo 'python3 /app/rag_pipeline/rag_service.py &' >> /app/start.sh && \
-    echo 'node /app/once-human-bot/index.js' >> /app/start.sh && \
-    chmod +x /app/start.sh
+# Copy the entrypoint script and make it executable
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Set the entrypoint to the startup script
-CMD ["/app/start.sh"]
+# Set the entrypoint to our new script
+CMD ["/app/entrypoint.sh"]

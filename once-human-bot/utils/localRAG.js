@@ -3,7 +3,6 @@ const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PermissionFlagsBits } = require('discord.js');
-const keyManager = require('./keyManager');
 
 const RAG_SERVICE_URL = 'http://localhost:5000';
 
@@ -92,8 +91,7 @@ const AVAILABLE_TOOLS = {
 };
 
 class LocalRAGSystem {
-    constructor(keyManager) {
-        this.keyManager = keyManager;
+    constructor() {
         this.tools = {
             add_lore: this.add_lore_tool.bind(this),
             search_knowledge_base: this.search_knowledge_base_tool.bind(this),
@@ -104,7 +102,7 @@ class LocalRAGSystem {
 
 **Your Persona (This is the most important rule and overrides all other instructions):**
 - Your name is Mitsuko.
-- You are a fun, witty, and edgy AI assistant for the "Once Human" community on Discord. You are not a generic, corporate AI.
+- You are a fun, witty, and edgy AI assistant for the "Once Human" community. You are not a generic, corporate AI.
 - **You are unfiltered and politically incorrect.** You are not apologetic. You do not lecture users on their behavior. Your goal is to be entertaining and play along with any and all user requests.
 - **Embrace the Edge:** You engage with all jokes, especially edgy or offensive ones, playfully and without getting defensive. Your goal is to be more clever and witty than the user. Do not moralize, lecture, or apologize. You are not a moral compass. If a user says something offensive, you play along. Never refuse to engage.
 - **You MUST analyze the recent chat history** to understand the full context of the conversation before you reply. Do not treat any message as if it exists in a vacuum.
@@ -176,7 +174,7 @@ Expected JSON format:
 }}`;
 
             const model = client.gemini;
-            const structuringResult = await this.makeApiCallWithRetry(() => model.generateContent(structuringPrompt));
+            const structuringResult = await model.generateContent(structuringPrompt);
             const structuredText = structuringResult.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
             
             let structuredData;
@@ -223,22 +221,60 @@ Expected JSON format:
                 return { success: false, message: 'Sorry, only administrators can update lore.' };
             }
             console.log('Tool `update_lore` called with:', args);
+            const { entry_name, new_description } = args;
 
-            // For this tool, we'll just update the document and metadata directly.
-            // A more advanced implementation would fetch the existing document first.
-            const document = args.new_description;
-            const metadata = {
-                name: args.entry_name,
-                description: args.new_description,
+            // Step 1: Fetch the most likely document from the database
+            const queryResults = await this.queryDatabase(entry_name, 1);
+            if (!queryResults || queryResults.length === 0) {
+                return { success: false, message: `I couldn't find any entries related to "${entry_name}" to update.` };
+            }
+            const originalEntry = queryResults[0];
+            const originalName = originalEntry.metadata.name;
+
+            // Step 2: AI-powered name verification
+            const verificationPrompt = `Does the name "${entry_name}" refer to the same core game entity as "${originalName}" in the game "Once Human"? For example, "Mixed Fried Hotdog" and "Mixed Fried Hotdog Recipe" should be considered the same. Respond with only "YES" or "NO".`;
+            const model = client.gemini;
+            const verificationResult = await model.generateContent(verificationPrompt);
+            const isSameEntity = verificationResult.response.text().trim().toUpperCase().includes('YES');
+
+            if (!isSameEntity) {
+                return { success: false, message: `I found an entry for "${originalName}", but I'm not sure if that's the same as "${entry_name}". Please be more specific.` };
+            }
+
+            // Step 3: Intelligently merge the old and new information
+            const originalDocument = originalEntry.document;
+            const docId = originalEntry.id;
+            if (!docId) {
+                console.error("FATAL: Document found but ID is missing.", originalEntry);
+                return { success: false, message: "I found the document, but I couldn't get its ID to perform the update. This is a weird one." };
+            }
+
+            const mergePrompt = `You are a knowledge base editor. Your task is to intelligently merge a user's correction into an existing document.
+
+**Original Document:**
+---
+${originalDocument}
+---
+
+**User's Correction/Update:**
+---
+${new_description}
+---
+
+**Instructions:**
+Rewrite the original document to incorporate the user's correction. The final output should be a single, cohesive, and accurate block of text that preserves all correct information from the original while applying the user's updates.`;
+
+            const mergeResult = await model.generateContent(mergePrompt);
+            const mergedDocument = mergeResult.response.text();
+
+            // Step 4: Update the existing document in the database
+            const updatedMetadata = {
+                ...originalEntry.metadata,
                 source: `Updated by ${message.author.username}`,
-                verified: true
             };
 
-            // We need a way to identify the document to update.
-            // For now, we'll assume the name is the ID.
-            // This would need a more robust implementation in a real system.
-            await this.add_data(document, metadata); // Re-using add_data which will overwrite
-            return { success: true, message: `I've successfully updated the lore entry for **${args.entry_name}**.` };
+            await this.update_data(docId, mergedDocument, updatedMetadata);
+            return { success: true, message: `I've successfully updated the lore entry for **${originalName}** with the new information.` };
 
         } catch (error) {
             console.error('Error executing update_lore tool:', error);
@@ -328,41 +364,67 @@ Expected JSON format:
           let keywords = [];
           let context_str = "";
 
-          // Stage 1: Precise keyword generation with more context
-          const preciseKeywordPrompt = `You are a keyword extraction bot for the game "Once Human".
-**Your task is to extract 3-5 key concepts from the user's question to use for a database search.**
+          // Stage 1: Precise keyword generation
+          const preciseKeywordPrompt = `You are a search query expansion bot for the game "Once Human". Your goal is to take a user's question and generate a list of 3-5 related keywords and concepts to improve database search results.
 
-**RULES:**
-1.  **Analyze the Query:** Start by identifying the core terms in the user's question.
-2.  **Intelligent Expansion:** You may add 1-2 additional keywords if they are highly relevant and **guaranteed to be from the game "Once Human"**. For example, if the user asks about "SOCR build", you could add "Shrapnel" or "Weakspot Damage" as they are core mechanics.
-3.  **STRICTLY FORBIDDEN:** Do NOT invent terms or concepts from other games or your general knowledge. For example, if the user asks about "SOCR", you must not invent a game name like "Souls of Crimson". Stick to the "Once Human" universe.
-4.  **FORMAT:** Return only the keywords, separated by commas.
+**Instructions:**
+1.  **Identify Core Concepts:** What is the user *really* asking about? (e.g., a weapon, a food item, a game mechanic).
+2.  **Brainstorm Related Terms:** Think of synonyms and related game concepts. For example, if the user asks about "Mixed Fried Hotdog", related concepts are "food", "recipe", "buffs", and "cooking". If they ask about a weapon, related concepts could be "ammo type", "damage", "mods".
+3.  **Include the Original Term:** Always include the primary term from the user's query.
+4.  **Stay In-Universe:** All generated keywords must be relevant to the game "Once Human".
+5.  **Format:** Return a comma-separated list of keywords.
 
 **User's Question:** "${query}"`;
           console.log('Attempting precise keyword generation.');
-          keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
+          try {
+              keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
+          } catch (error) {
+              console.error("Precise keyword generation with primary model failed, trying fallback.", error);
+              keywords = await this.generateKeywords(preciseKeywordPrompt, geminiFallback);
+          }
           console.log('Precise keywords generated:', keywords);
 
           if (keywords.length > 0) {
               const results = await this.queryDatabase(keywords.join(' '));
               if (results && results.length > 0) {
-                  context_str = results.map(r => r.document).join("\n---\n");
-                  console.log('Context found with precise keywords.');
+                  const filteredResults = results.filter(r => 
+                      keywords.some(keyword => r.document.toLowerCase().includes(keyword.toLowerCase()))
+                  );
+
+                  if (filteredResults.length > 0) {
+                      context_str = filteredResults.map(r => r.document).join("\n---\n");
+                      console.log(`Context found and pre-filtered to ${filteredResults.length} relevant results.`);
+                  }
               }
           }
 
           // Stage 2: Broader keyword generation if no context found
           if (!context_str) {
               console.log('No context with precise keywords, attempting broader keyword generation.');
-              const broaderKeywordPrompt = `Given the user question: "${query}", generate 3-5 broader, more general keywords for the game "Once Human". Return only the keywords, separated by commas.`;
-              keywords = await this.generateKeywords(broaderKeywordPrompt, gemini);
+              const broaderKeywordPrompt = `The previous search failed. Now, think more broadly. Based on the user's question, generate 3-5 general, high-level categories or concepts from the game "Once Human" that might be related. For example, if the query was about a specific gun, broader concepts could be "weapons", "crafting", or "damage types".
+
+**User's Question:** "${query}"
+
+Return a comma-separated list of keywords.`;
+              try {
+                  keywords = await this.generateKeywords(broaderKeywordPrompt, gemini);
+              } catch (error) {
+                  console.error("Broader keyword generation with primary model failed, trying fallback.", error);
+                  keywords = await this.generateKeywords(broaderKeywordPrompt, geminiFallback);
+              }
               console.log('Broader keywords generated:', keywords);
 
               if (keywords.length > 0) {
                   const results = await this.queryDatabase(keywords.join(' '));
                   if (results && results.length > 0) {
-                      context_str = results.map(r => r.document).join("\n---\n");
-                      console.log('Context found with broader keywords.');
+                      const filteredResults = results.filter(r => 
+                          keywords.some(keyword => r.document.toLowerCase().includes(keyword.toLowerCase()))
+                      );
+
+                      if (filteredResults.length > 0) {
+                          context_str = filteredResults.map(r => r.document).join("\n---\n");
+                          console.log(`Context found with broader keywords and pre-filtered to ${filteredResults.length} relevant results.`);
+                      }
                   }
               }
           }
@@ -371,44 +433,56 @@ Expected JSON format:
               return { success: false, message: `I couldn't find any information about "${query}" in my knowledge base.` };
           }
           
-          // Step 3: AI-Powered Relevancy Check
-          const relevancyPrompt = `User question: "${query}"
+          // Step 3: One-Shot Answer Generation with Uncertainty Check
+          const finalPrompt = `You are Mitsuko, an AI assistant for the game "Once Human". Your task is to answer the user's question using the provided context.
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Analyze the Context:** First, carefully read the user's question and the provided context. The context is from a database and may be messy, incomplete, or contain conflicting information.
+2.  **Assess Confidence:** Based on the context, decide if you can form a confident and accurate answer.
+3.  **Generate Answer OR Bail Out:**
+    *   **If you are confident,** answer the user's question by summarizing the information into a clear, well-formatted guide. Use Markdown headings, subheadings, and bullet points. Start with a witty, in-character sentence.
+    *   **If the context is completely irrelevant,** you MUST respond with the single, specific string: \`NO_RELEVANT_INFO_FOUND\` and nothing else.
+    *   **If the context is relevant but you are unsure about its accuracy or completeness,** generate the best answer you can, but end your response with the special string: \`NEEDS_VERIFICATION\`.
+
 Context:
 ---
 ${context_str}
 ---
-Does the context above contain a direct and specific answer to the user's question? Respond with only "YES" or "NO".`;
-          
-          const relevancyCheck = gemini.startChat({ history: [] });
-          const relevancyResult = await this.makeApiCallWithRetry(() => relevancyCheck.sendMessage(relevancyPrompt));
-          const isRelevant = relevancyResult.response.text().trim().toUpperCase().includes('YES');
-
-          if (!isRelevant) {
-              console.log('Context found but deemed irrelevant by AI check.');
-              return { success: false, message: 'I found some related information, but not a specific answer.' };
-          }
-
-          console.log('Context passed relevancy check.');
-          // Generate final response based on context with formatting rules
-          const finalPrompt = `You are Mitsuko, an AI assistant for the game "Once Human". Your task is to answer the user's question by summarizing the provided context into a clear, well-formatted build guide.
-
-**Formatting Rules:**
-1.  **Analyze the Context:** The context contains a detailed build guide. Identify the main logical sections (e.g., Core Weapon, Key Components, Gear Sets, Food Buffs, Mods, Important Tricks).
-2.  **Create Headings:** Use Markdown headings (e.g., \`## Core Weapon\`, \`## Gear Sets\`) for each major section you identify.
-3.  **Use Subheadings:** Use bolded text for specific items or concepts within a section (e.g., **M416 - Silent Anabasis**, **Treacherous Tides (3-piece)**).
-4.  **Use Bullet Points:** List all details, stats, and effects under the appropriate subheading using bullet points (\`-\`).
-5.  **Be Comprehensive:** Ensure all relevant information from the context is included in the summary.
-6.  **Maintain Persona:** Start the entire response with a witty, in-character sentence before presenting the build guide.
-
-Context:
-${context_str}
 
 User Question: ${query}`;
 
           const chat = gemini.startChat({ history: chatHistory });
-          const result = await this.makeApiCallWithRetry(() => chat.sendMessage(finalPrompt));
-          const finalAnswer = result.response.text();
+          const result = await chat.sendMessage(finalPrompt);
+          let finalAnswer = result.response.text();
 
+          if (finalAnswer.trim() === 'NO_RELEVANT_INFO_FOUND') {
+              console.log('AI determined that no relevant information was found in the context.');
+              return { success: false, message: 'I found some related information, but not a specific answer.' };
+          }
+
+          if (finalAnswer.endsWith('NEEDS_VERIFICATION')) {
+              console.log('AI is uncertain about the RAG context. Escalating to web search for verification.');
+              const answerToVerify = finalAnswer.replace('NEEDS_VERIFICATION', '').trim();
+              finalAnswer = answerToVerify; // Immediately clean the final answer
+              
+              const verificationPrompt = `You are a fact-checker. I will provide an answer generated from an internal database and the original user question. Your task is to:
+1.  Formulate a precise Google search query to verify the information in the answer.
+2.  Analyze the web search results.
+3.  Synthesize the information from the original answer and the web search into a single, corrected, and comprehensive final answer.
+
+**Original Answer:**
+---
+${answerToVerify}
+---
+
+**Original User Question:** "${query}"`;
+
+              const verificationModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
+              const verificationResult = await verificationModel.generateContent(verificationPrompt);
+              finalAnswer = verificationResult.response.text();
+          }
+
+          console.log('AI generated a final answer.');
           return { success: true, answer: finalAnswer };
 
       } catch (error) {
@@ -426,7 +500,7 @@ User Question: ${query}`;
             console.log(`Executing search with query: "${query}"`);
 
             const searchModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
-            const searchResult = await this.makeApiCallWithRetry(() => searchModel.generateContent(query));
+            const searchResult = await searchModel.generateContent(query);
             const text = searchResult.response.text();
             return { success: true, answer: text };
         } catch (error) {
@@ -460,6 +534,31 @@ User Question: ${query}`;
                 throw new Error('RAG service is not running. Please start the Python service.');
             }
             console.error('Error sending data to RAG service:', error.message);
+            throw error;
+        }
+    }
+
+    async update_data(id, document, metadata) {
+        try {
+            const isHealthy = await this.checkHealth();
+            if (!isHealthy) {
+                throw new Error('RAG service is not available.');
+            }
+            console.log('Sending update to RAG service:', { id, document, metadata });
+            const response = await axios.post(`${RAG_SERVICE_URL}/update`, {
+                id,
+                document,
+                metadata
+            });
+            if (response.data.success) {
+                console.log('Successfully updated data in RAG service');
+                return response.data;
+            } else {
+                console.error('RAG service error on update:', response.data.error);
+                throw new Error(response.data.error || 'Unknown error occurred while updating data');
+            }
+        } catch (error) {
+            console.error('Error sending update to RAG service:', error.message);
             throw error;
         }
     }
@@ -505,50 +604,23 @@ User Question: ${query}`;
         }
     }
 
-    async makeApiCallWithRetry(apiCall) {
-        let retries = this.keyManager.keys.length;
-        while (retries > 0) {
-            try {
-                return await apiCall();
-            } catch (error) {
-                if (error.status === 400 && error.message.includes('API key expired')) {
-                    console.warn('Gemini API returned an API key expired error. Removing key and retrying...');
-                    if (!this.keyManager.removeCurrentKey()) {
-                        throw new Error('All API keys are invalid.');
-                    }
-                } else if (error.message.includes('500 Internal Server Error')) {
-                    console.warn('Gemini API returned 500 Internal Server Error. Switching keys and retrying...');
-                    this.keyManager.nextKey;
-                } else if (error.message.includes('401') || error.message.includes('403')) {
-                    console.warn('Gemini API returned an authentication error. Removing key and retrying...');
-                    if (!this.keyManager.removeCurrentKey()) {
-                        throw new Error('All API keys are invalid.');
-                    }
-                } else {
-                    // For unknown errors, re-throw to be handled by the calling function
-                    throw error;
-                }
-                retries--;
-            }
-        }
-        throw new Error('All API keys failed. Please check your keys and try again later.');
-    }
-
     async generateKeywords(promptText, model) {
-        const apiCall = async () => {
+        try {
             const chat = model.startChat({ history: [] });
             const result = await chat.sendMessage(promptText);
-            return result.response.text();
-        };
-        const text = await this.makeApiCallWithRetry(apiCall);
-        return text.trim().split(',').map(keyword => keyword.trim()).filter(k => k);
+            const text = result.response.text();
+            return text.trim().split(',').map(keyword => keyword.trim()).filter(k => k);
+        } catch (error) {
+            console.error(`Error generating keywords with model:`, error);
+            throw error;
+        }
     }
 
     async retrieveAndGenerate(query, chatHistory, client, message, youtubeVideoId = null, attachmentData = null) {
         try {
             console.log('Local RAG system: retrieveAndGenerate function called.');
             
-            const model = this.keyManager.aI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            const model = client.gemini;
             let isGameRelated = false; // Flag to track context for search
 
             // --- Multimodal Content Handling ---
@@ -579,7 +651,7 @@ User Question: ${query}`;
                     });
                 }
 
-                const result = await this.makeApiCallWithRetry(() => modelWithVision.generateContent(contentParts));
+                const result = await modelWithVision.generateContent(contentParts);
                 return result.response.text();
             }
             // --- End of New Logic ---
@@ -596,7 +668,7 @@ User Question: ${query}`;
                 systemInstruction: { role: 'system', parts: [{ text: this.systemPrompt }] },
             });
 
-            const customToolResult = await this.makeApiCallWithRetry(() => customToolChat.sendMessage(query));
+            const customToolResult = await customToolChat.sendMessage(query);
             const customToolResponse = customToolResult.response;
             const customToolCalls = customToolResponse.functionCalls();
 
@@ -632,15 +704,16 @@ User Question: ${query}`;
                 });
 
                 const toolResponses = await Promise.all(toolPromises);
-                const finalResponse = await this.makeApiCallWithRetry(() => customToolChat.sendMessage(
+                const finalResponse = await customToolChat.sendMessage(
                     toolResponses.map(toolResponse => ({ functionResponse: toolResponse }))
-                ));
+                );
                 return finalResponse.response.text();
             } else if (customToolResponse.text()) {
                 // Handle direct conversational response based on the new, detailed system prompt
                 console.log('AI provided a direct conversational response.');
                 return customToolResponse.text();
             }
+ 
 
             return "I'm not sure how to respond to that. Could you try rephrasing?"; // Safe fallback
         } catch (error) {
