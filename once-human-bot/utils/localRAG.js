@@ -399,7 +399,7 @@ Expected JSON format:
                   );
 
                   if (filteredResults.length > 0) {
-                      context_str = filteredResults.map(r => r.document).join("\n---\n");
+                      context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
                       console.log(`Context found and pre-filtered to ${filteredResults.length} relevant results.`);
                   }
               }
@@ -429,7 +429,7 @@ Return a comma-separated list of keywords.`;
                       );
 
                       if (filteredResults.length > 0) {
-                          context_str = filteredResults.map(r => r.document).join("\n---\n");
+                          context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
                           console.log(`Context found with broader keywords and pre-filtered to ${filteredResults.length} relevant results.`);
                       }
                   }
@@ -444,12 +444,12 @@ Return a comma-separated list of keywords.`;
           const finalPrompt = `You are Mitsuko, an AI assistant for the game "Once Human". Your task is to answer the user's question using the provided context.
 
 **CRITICAL INSTRUCTIONS:**
-1.  **Analyze the Context:** First, carefully read the user's question and the provided context. The context is from a database and may be messy, incomplete, or contain conflicting information.
-2.  **Assess Confidence:** Based on the context, decide if you can form a confident and accurate answer.
-3.  **Generate Answer OR Bail Out:**
-    *   **If you are confident,** answer the user's question by summarizing the information into a clear, well-formatted guide. Use Markdown headings (up to level 3, e.g., ###), subheadings, and bullet points. Start with a witty, in-character sentence.
-    *   **If the context is completely irrelevant,** you MUST respond with the single, specific string: \`NO_RELEVANT_INFO_FOUND\` and nothing else.
-    *   **If the context is relevant but you are unsure about its accuracy or completeness,** generate the best answer you can, but end your response with the special string: \`NEEDS_VERIFICATION\`.
+1.  **Analyze the Context:** The context below is from a database. Each entry is tagged with its source status: \`[Source Status: VERIFIED]\` or \`[Source Status: UNVERIFIED]\`.
+2.  **Prioritize Verified Information:** If you find any information from a \`VERIFIED\` source, you MUST treat it as the absolute truth. Base your entire answer on the verified information if it's relevant.
+3.  **Assess Confidence & Generate Answer:**
+    *   **If you use \`VERIFIED\` context to answer the question,** you are confident. Provide a direct, clear answer. Do NOT use the \`NEEDS_VERIFICATION\` tag.
+    *   **If the only relevant context is \`UNVERIFIED\`,** you are not confident. Generate the best answer you can, but you MUST end your response with the special string: \`NEEDS_VERIFICATION\`.
+    *   **If no context is relevant,** you MUST respond with the single, specific string: \`NO_RELEVANT_INFO_FOUND\` and nothing else.
 
 Context:
 ---

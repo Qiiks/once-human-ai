@@ -42,7 +42,6 @@ COPY . .
 # Copy your local ChromaDB data into the image. This will be used to seed
 # the persistent volume on the first launch.
 # IMPORTANT: Make sure your local DB path is correct.
-COPY ./rag_pipeline/backupppp/chroma_db /app/prebuilt_db
 
 # --- Start Services ---
 # Expose the port for the Flask API

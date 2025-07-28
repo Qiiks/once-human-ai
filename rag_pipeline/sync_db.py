@@ -44,34 +44,132 @@ def add_document(base_url, document_data):
         print(f"Error adding document: {e}")
         return False
 
+def delete_document(base_url, doc_id):
+    """Deletes a single document from the specified RAG service by its ID."""
+    try:
+        response = requests.post(f"{base_url}/delete", json={"id": doc_id})
+        response.raise_for_status()
+        return response.json().get("success", False)
+    except requests.exceptions.RequestException as e:
+        print(f"Error deleting document {doc_id}: {e}")
+        return False
+
+def get_timestamp(doc):
+    """Safely retrieves and parses a timestamp from a document's metadata."""
+    ts_str = doc.get("metadata", {}).get("updated_at")
+    if not ts_str:
+        return None
+    try:
+        # Handle both ISO format with 'Z' and without
+        if ts_str.endswith('Z'):
+            ts_str = ts_str[:-1] + '+00:00'
+        return datetime.datetime.fromisoformat(ts_str)
+    except (ValueError, TypeError):
+        return None
+
 def push_to_remote():
     """
-    Synchronizes the remote database with the local one by fetching all
-    local documents and adding them to the remote database.
+    Synchronizes databases based on timestamps. The most recent version of a
+    document takes precedence.
+    - Adds new documents from local to remote.
+    - Updates documents on remote if the local version is newer.
+    - Skips updates if the remote version is newer.
+    - Deletes documents from remote that are not in local.
     """
-    print("--- Starting Push to Remote ---")
-    
-    # 1. Fetch all data from the local database
+    print("--- Starting Timestamp-based Sync to Remote ---")
+
+    # 1. Fetch all documents from both databases
+    print("Fetching documents from local database...")
     local_documents = fetch_all_documents(LOCAL_URL)
-    if not local_documents:
+    if local_documents is None:
         print("Could not retrieve documents from local database. Aborting sync.")
         return
 
-    # 2. Add each document to the remote database
-    print(f"\nPreparing to sync {len(local_documents)} documents to {REMOTE_URL}...")
-    success_count = 0
+    print("Fetching documents from remote database...")
+    remote_documents = fetch_all_documents(REMOTE_URL)
+    if remote_documents is None:
+        print("Could not retrieve documents from remote database. Aborting sync.")
+        return
+
+    # 2. Create maps for efficient lookup
+    local_doc_map = {
+        (doc['metadata']['source'], doc['metadata'].get('page_number')): doc
+        for doc in local_documents
+    }
+    remote_doc_map = {
+        (doc['metadata']['source'], doc['metadata'].get('page_number')): doc
+        for doc in remote_documents
+    }
+    print(f"Found {len(local_doc_map)} local documents and {len(remote_doc_map)} remote documents.")
+
+    # 3. Initialize counters
+    added_count = 0
+    updated_count = 0
+    skipped_count = 0
+    deleted_count = 0
     fail_count = 0
 
-    for doc in tqdm(local_documents, desc="Syncing to remote DB"):
-        if add_document(REMOTE_URL, doc):
-            success_count += 1
-        else:
-            fail_count += 1
-            print(f"Failed to add document ID (from local): {doc.get('id')}")
+    # 4. Process local documents (Additions and Updates)
+    print("\nProcessing local documents (checking for additions/updates)...")
+    for key, local_doc in tqdm(local_doc_map.items(), desc="Syncing local to remote"):
+        remote_doc = remote_doc_map.get(key)
 
-    print("\n--- Push Complete ---")
-    print(f"Successfully synced: {success_count}")
-    print(f"Failed to sync: {fail_count}")
+        if not remote_doc:
+            # Document is new, add it
+            if add_document(REMOTE_URL, local_doc):
+                added_count += 1
+            else:
+                fail_count += 1
+                print(f"Failed to add new document: {key}")
+        else:
+            # Document exists on both, compare timestamps
+            local_ts = get_timestamp(local_doc)
+            remote_ts = get_timestamp(remote_doc)
+
+            # Decision logic based on timestamps
+            if local_ts and remote_ts:
+                if local_ts > remote_ts:
+                    # Local is newer, update remote
+                    if delete_document(REMOTE_URL, remote_doc['id']) and add_document(REMOTE_URL, local_doc):
+                        updated_count += 1
+                    else:
+                        fail_count += 1
+                        print(f"Failed to update document with newer timestamp: {key}")
+                elif remote_ts > local_ts:
+                    # Remote is newer, skip
+                    skipped_count += 1
+                else:
+                    # Timestamps are identical, skip
+                    skipped_count += 1
+            elif local_ts:
+                # Only local has a timestamp, so it's newer
+                if delete_document(REMOTE_URL, remote_doc['id']) and add_document(REMOTE_URL, local_doc):
+                    updated_count += 1
+                else:
+                    fail_count += 1
+                    print(f"Failed to update document with new timestamp: {key}")
+            else:
+                # Local has no timestamp, or neither do. Keep remote version.
+                skipped_count += 1
+
+    # 5. Process remote documents (Deletions)
+    print("\nProcessing remote documents (checking for deletions)...")
+    for key, remote_doc in tqdm(remote_doc_map.items(), desc="Checking for remote deletions"):
+        if key not in local_doc_map:
+            # Document was deleted locally, so delete it from remote
+            if delete_document(REMOTE_URL, remote_doc['id']):
+                deleted_count += 1
+            else:
+                fail_count += 1
+                print(f"Failed to delete document from remote: {key}")
+
+    # 6. Final summary
+    print("\n--- Sync Complete ---")
+    print(f"Documents Added:   {added_count} (new)")
+    print(f"Documents Updated: {updated_count} (local was newer)")
+    print(f"Documents Deleted: {deleted_count} (removed from local)")
+    print(f"Documents Skipped: {skipped_count} (remote was newer or unchanged)")
+    print(f"Operations Failed: {fail_count}")
 
 def pull_from_remote():
     """
