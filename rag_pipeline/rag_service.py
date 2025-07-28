@@ -15,6 +15,16 @@ import io
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Define a filter to exclude /health logs
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        # Exclude logs containing 'GET /health'
+        return 'GET /health' not in record.getMessage()
+
+# Get the Werkzeug logger and add the filter
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(HealthCheckFilter())
+ 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 

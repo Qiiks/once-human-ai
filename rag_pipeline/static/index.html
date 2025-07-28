@@ -45,7 +45,7 @@
         });
 
         function fetchDocuments() {
-            fetch('http://localhost:5000/documents')
+            fetch('/documents')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -71,7 +71,7 @@
 
         function deleteDocument(id) {
             if (confirm('Are you sure you want to delete this document?')) {
-                fetch('http://localhost:5000/delete', {
+                fetch('/delete', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

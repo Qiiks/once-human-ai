@@ -9,6 +9,13 @@ const RAG_SERVICE_URL = 'http://localhost:5000';
 // Tool definitions for Gemini
 const groundingTool = { googleSearch: {} };
 
+// Function to check for build-related keywords
+function isBuildQuery(query) {
+    const buildKeywords = ['build', 'meta', 'setup', 'gear', 'loadout', 'best build', 'weapon setup', 'armor set'];
+    const lowerCaseQuery = query.toLowerCase();
+    return buildKeywords.some(keyword => lowerCaseQuery.includes(keyword));
+}
+
 const AVAILABLE_TOOLS = {
     add_lore: {
         name: 'add_lore',
@@ -76,7 +83,7 @@ const AVAILABLE_TOOLS = {
     },
     google_search: {
         name: 'google_search',
-        description: 'Use this tool to search the web for information when the user explicitly asks for a web search or when the internal knowledge base does not contain the answer.',
+        description: 'Use this tool to search the web for information ONLY when the user\'s prompt explicitly contains keywords like "search", "google", "web", or "internet".',
         parameters: {
             type: 'object',
             properties: {
@@ -122,13 +129,13 @@ class LocalRAGSystem {
 
 3.  **SEARCH INTENT:**
     *   If the user is asking a question about the game "Once Human" (e.g., "where can I find...", "what is the best..."), you **MUST** call the \`search_knowledge_base\` tool.
-    *   If the \`search_knowledge_base\` tool fails or returns no relevant results, you are then required to call the \`google_search\` tool as a fallback.
+    *   **Do NOT use \`google_search\` for any query related to game builds, setups, or metas.** For these, rely exclusively on the internal knowledge base. For all other topics, you may use \`google_search\` if the knowledge base does not provide a sufficient answer.
 
 4.  **NO TOOL INTENT:**
     *   If the user's message is purely conversational, a joke, or does not match any of the intents above, you may respond in character without using any tools.
 
 **Tool Usage Guidelines:**
-*   **\`google_search\`:** Before using this tool, rephrase the user's question into an effective search query. For example, "can you look up the coordinates to find the recipe for whimsical drink" should become "whimsical drink recipe location coordinates once human".`;
+*   **\`google_search\`:** Only use this tool if the user explicitly asks for a web search. Before using this tool, rephrase the user's question into an effective search query. For example, "can you look up the coordinates to find the recipe for whimsical drink" should become "whimsical drink recipe location coordinates once human".`;
     }
 
     async add_lore_tool(args, message, client) {
@@ -355,7 +362,7 @@ Expected JSON format:
         }
     }
     
-    async search_knowledge_base_tool(args, client, chatHistory) {
+    async search_knowledge_base_tool(args, client, chatHistory, originalQuery, disableWebSearch = false) {
       try {
           console.log('Tool `search_knowledge_base` called with:', args);
           const { query } = args;
@@ -461,11 +468,12 @@ User Question: ${query}`;
           }
 
           if (finalAnswer.endsWith('NEEDS_VERIFICATION')) {
-              console.log('AI is uncertain about the RAG context. Escalating to web search for verification.');
               const answerToVerify = finalAnswer.replace('NEEDS_VERIFICATION', '').trim();
               finalAnswer = answerToVerify; // Immediately clean the final answer
-              
-              const verificationPrompt = `You are a fact-checker. I will provide an answer generated from an internal database and the original user question. Your task is to:
+
+              if (!disableWebSearch) {
+                  console.log('AI is uncertain and web search is enabled. Verifying online.');
+                  const verificationPrompt = `You are a fact-checker. I will provide an answer generated from an internal database and the original user question. Your task is to:
 1.  Formulate a precise Google search query to verify the information in the answer.
 2.  Analyze the web search results.
 3.  Synthesize the information from the original answer and the web search into a single, corrected, and comprehensive final answer.
@@ -477,9 +485,13 @@ ${answerToVerify}
 
 **Original User Question:** "${query}"`;
 
-              const verificationModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
-              const verificationResult = await verificationModel.generateContent(verificationPrompt);
-              finalAnswer = verificationResult.response.text();
+                  const verificationModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
+                  const verificationResult = await verificationModel.generateContent(verificationPrompt);
+                  finalAnswer = verificationResult.response.text();
+              } else {
+                  console.log('AI is uncertain, but no web search was requested. Returning RAG answer with a disclaimer.');
+                  finalAnswer += "\n\n*(I'm not 100% confident about this information, but it's what I found in my knowledge base.)*";
+              }
           }
 
           console.log('AI generated a final answer.');
@@ -681,13 +693,22 @@ ${answerToVerify}
                     switch (call.name) {
                         case 'search_knowledge_base':
                             isGameRelated = true;
-                            const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory);
-                            if (!ragResult.success) {
-                                console.log('Local RAG search failed. Escalating to web search.');
-                                const fallbackResult = await this.tools.google_search(call.args, client);
-                                return { name: call.name, response: fallbackResult };
+                            // **New Logic: Check if the query is about a build**
+                            if (isBuildQuery(query)) {
+                                console.log('Build query detected. Web search will be disabled.');
+                                // For build queries, call the RAG tool but never fall back to a web search.
+                                const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, true); // Pass 'disableWebSearch=true'
+                                return { name: call.name, response: ragResult };
+                            } else {
+                                // For all other queries, proceed with the standard RAG search that can fall back to the web.
+                                const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, false);
+                                 if (!ragResult.success || (ragResult.answer && ragResult.answer.includes('NEEDS_VERIFICATION'))) {
+                                    console.log('RAG search was inconclusive for a non-build query. Escalating to web search.');
+                                    const fallbackResult = await this.tools.google_search(call.args, client);
+                                    return { name: call.name, response: fallbackResult };
+                                }
+                                return { name: call.name, response: ragResult };
                             }
-                            return { name: call.name, response: ragResult };
                         case 'add_lore':
                             toolResult = await this.tools.add_lore(call.args, message, client);
                             return { name: call.name, response: toolResult };
