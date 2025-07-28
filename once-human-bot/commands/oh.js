@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { retrieveAndGenerate } = require('../utils/ragSystem');
+const { retrieveAndGenerate } = require('../utils/localRAG');
 const { getHistory, addMessage } = require('../utils/chatHistoryManager');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs').promises;
@@ -35,7 +35,7 @@ module.exports = {
             if (subcommand === 'ask') {
                 const query = interaction.options.getString('query');
                 const chatHistory = getHistory(channelId);
-                const result = await retrieveAndGenerate(query, chatHistory, interaction.client.pineconeIndex, interaction.client.gemini, interaction.client.embeddingModel, interaction.client.geminiFallback, interaction.client.gameEntities, interaction.client);
+                const result = await interaction.client.ragSystem.retrieveAndGenerate(query, chatHistory, interaction.client);
                 addMessage(channelId, 'user', query);
                 addMessage(channelId, 'model', result);
                 await interaction.editReply(result);
@@ -80,13 +80,9 @@ module.exports = {
                 const embedding = embeddingResult.embedding.values;
 
                 // 4. Upsert to Pinecone
-                await interaction.client.pineconeIndex.upsert([
-                    {
-                        id: newEntity.id,
-                        values: embedding,
-                        metadata: { name: newEntity.name, type: newEntity.type, description: newEntity.description },
-                    },
-                ]);
+                // The new RAG system uses the local ChromaDB instance, so we no longer need to upsert to Pinecone.
+                // The data is added to the database via the Python service.
+                // We will, however, keep the logic to update the in-memory game entities.
 
                 // 5. Update game_entities.json
                 const gameEntitiesPath = path.join(__dirname, '..', '..', 'rag_pipeline', 'game_entities.json');

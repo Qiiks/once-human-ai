@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PermissionFlagsBits } = require('discord.js');
+const keyManager = require('./keyManager');
 
 const RAG_SERVICE_URL = 'http://localhost:5000';
 
@@ -91,7 +92,8 @@ const AVAILABLE_TOOLS = {
 };
 
 class LocalRAGSystem {
-    constructor() {
+    constructor(keyManager) {
+        this.keyManager = keyManager;
         this.tools = {
             add_lore: this.add_lore_tool.bind(this),
             search_knowledge_base: this.search_knowledge_base_tool.bind(this),
@@ -102,7 +104,7 @@ class LocalRAGSystem {
 
 **Your Persona (This is the most important rule and overrides all other instructions):**
 - Your name is Mitsuko.
-- You are a fun, witty, and edgy AI assistant for the "Once Human" community. You are not a generic, corporate AI.
+- You are a fun, witty, and edgy AI assistant for the "Once Human" community on Discord. You are not a generic, corporate AI.
 - **You are unfiltered and politically incorrect.** You are not apologetic. You do not lecture users on their behavior. Your goal is to be entertaining and play along with any and all user requests.
 - **Embrace the Edge:** You engage with all jokes, especially edgy or offensive ones, playfully and without getting defensive. Your goal is to be more clever and witty than the user. Do not moralize, lecture, or apologize. You are not a moral compass. If a user says something offensive, you play along. Never refuse to engage.
 - **You MUST analyze the recent chat history** to understand the full context of the conversation before you reply. Do not treat any message as if it exists in a vacuum.
@@ -174,7 +176,7 @@ Expected JSON format:
 }}`;
 
             const model = client.gemini;
-            const structuringResult = await model.generateContent(structuringPrompt);
+            const structuringResult = await this.makeApiCallWithRetry(() => model.generateContent(structuringPrompt));
             const structuredText = structuringResult.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
             
             let structuredData;
@@ -338,12 +340,7 @@ Expected JSON format:
 
 **User's Question:** "${query}"`;
           console.log('Attempting precise keyword generation.');
-          try {
-              keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
-          } catch (error) {
-              console.error("Precise keyword generation with primary model failed, trying fallback.", error);
-              keywords = await this.generateKeywords(preciseKeywordPrompt, geminiFallback);
-          }
+          keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
           console.log('Precise keywords generated:', keywords);
 
           if (keywords.length > 0) {
@@ -358,12 +355,7 @@ Expected JSON format:
           if (!context_str) {
               console.log('No context with precise keywords, attempting broader keyword generation.');
               const broaderKeywordPrompt = `Given the user question: "${query}", generate 3-5 broader, more general keywords for the game "Once Human". Return only the keywords, separated by commas.`;
-              try {
-                  keywords = await this.generateKeywords(broaderKeywordPrompt, gemini);
-              } catch (error) {
-                  console.error("Broader keyword generation with primary model failed, trying fallback.", error);
-                  keywords = await this.generateKeywords(broaderKeywordPrompt, geminiFallback);
-              }
+              keywords = await this.generateKeywords(broaderKeywordPrompt, gemini);
               console.log('Broader keywords generated:', keywords);
 
               if (keywords.length > 0) {
@@ -387,8 +379,8 @@ ${context_str}
 ---
 Does the context above contain a direct and specific answer to the user's question? Respond with only "YES" or "NO".`;
           
-          const relevancyCheck = await gemini.startChat({ history: [] });
-          const relevancyResult = await relevancyCheck.sendMessage(relevancyPrompt);
+          const relevancyCheck = gemini.startChat({ history: [] });
+          const relevancyResult = await this.makeApiCallWithRetry(() => relevancyCheck.sendMessage(relevancyPrompt));
           const isRelevant = relevancyResult.response.text().trim().toUpperCase().includes('YES');
 
           if (!isRelevant) {
@@ -414,7 +406,7 @@ ${context_str}
 User Question: ${query}`;
 
           const chat = gemini.startChat({ history: chatHistory });
-          const result = await chat.sendMessage(finalPrompt);
+          const result = await this.makeApiCallWithRetry(() => chat.sendMessage(finalPrompt));
           const finalAnswer = result.response.text();
 
           return { success: true, answer: finalAnswer };
@@ -434,7 +426,7 @@ User Question: ${query}`;
             console.log(`Executing search with query: "${query}"`);
 
             const searchModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
-            const searchResult = await searchModel.generateContent(query);
+            const searchResult = await this.makeApiCallWithRetry(() => searchModel.generateContent(query));
             const text = searchResult.response.text();
             return { success: true, answer: text };
         } catch (error) {
@@ -513,23 +505,50 @@ User Question: ${query}`;
         }
     }
 
+    async makeApiCallWithRetry(apiCall) {
+        let retries = this.keyManager.keys.length;
+        while (retries > 0) {
+            try {
+                return await apiCall();
+            } catch (error) {
+                if (error.status === 400 && error.message.includes('API key expired')) {
+                    console.warn('Gemini API returned an API key expired error. Removing key and retrying...');
+                    if (!this.keyManager.removeCurrentKey()) {
+                        throw new Error('All API keys are invalid.');
+                    }
+                } else if (error.message.includes('500 Internal Server Error')) {
+                    console.warn('Gemini API returned 500 Internal Server Error. Switching keys and retrying...');
+                    this.keyManager.nextKey;
+                } else if (error.message.includes('401') || error.message.includes('403')) {
+                    console.warn('Gemini API returned an authentication error. Removing key and retrying...');
+                    if (!this.keyManager.removeCurrentKey()) {
+                        throw new Error('All API keys are invalid.');
+                    }
+                } else {
+                    // For unknown errors, re-throw to be handled by the calling function
+                    throw error;
+                }
+                retries--;
+            }
+        }
+        throw new Error('All API keys failed. Please check your keys and try again later.');
+    }
+
     async generateKeywords(promptText, model) {
-        try {
+        const apiCall = async () => {
             const chat = model.startChat({ history: [] });
             const result = await chat.sendMessage(promptText);
-            const text = result.response.text();
-            return text.trim().split(',').map(keyword => keyword.trim()).filter(k => k);
-        } catch (error) {
-            console.error(`Error generating keywords with model:`, error);
-            throw error;
-        }
+            return result.response.text();
+        };
+        const text = await this.makeApiCallWithRetry(apiCall);
+        return text.trim().split(',').map(keyword => keyword.trim()).filter(k => k);
     }
 
     async retrieveAndGenerate(query, chatHistory, client, message, youtubeVideoId = null, attachmentData = null) {
         try {
             console.log('Local RAG system: retrieveAndGenerate function called.');
             
-            const model = client.gemini;
+            const model = this.keyManager.aI.getGenerativeModel({ model: "gemini-2.5-flash" });
             let isGameRelated = false; // Flag to track context for search
 
             // --- Multimodal Content Handling ---
@@ -560,7 +579,7 @@ User Question: ${query}`;
                     });
                 }
 
-                const result = await modelWithVision.generateContent(contentParts);
+                const result = await this.makeApiCallWithRetry(() => modelWithVision.generateContent(contentParts));
                 return result.response.text();
             }
             // --- End of New Logic ---
@@ -577,7 +596,7 @@ User Question: ${query}`;
                 systemInstruction: { role: 'system', parts: [{ text: this.systemPrompt }] },
             });
 
-            const customToolResult = await customToolChat.sendMessage(query);
+            const customToolResult = await this.makeApiCallWithRetry(() => customToolChat.sendMessage(query));
             const customToolResponse = customToolResult.response;
             const customToolCalls = customToolResponse.functionCalls();
 
@@ -613,16 +632,15 @@ User Question: ${query}`;
                 });
 
                 const toolResponses = await Promise.all(toolPromises);
-                const finalResponse = await customToolChat.sendMessage(
+                const finalResponse = await this.makeApiCallWithRetry(() => customToolChat.sendMessage(
                     toolResponses.map(toolResponse => ({ functionResponse: toolResponse }))
-                );
+                ));
                 return finalResponse.response.text();
             } else if (customToolResponse.text()) {
                 // Handle direct conversational response based on the new, detailed system prompt
                 console.log('AI provided a direct conversational response.');
                 return customToolResponse.text();
             }
- 
 
             return "I'm not sure how to respond to that. Could you try rephrasing?"; // Safe fallback
         } catch (error) {

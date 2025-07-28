@@ -6,12 +6,15 @@ primary_region = "sin" # Example region, choose one close to you or your users
 [build]
   dockerfile = "Dockerfile"
 
+[vm]
+  size = "shared-cpu-4x" # 1GB RAM
+
 [http_service]
   internal_port = 5000
   force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 0 # Set to 1 for continuous operation
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
 
   [[http_service.checks]]
     interval = "10s"

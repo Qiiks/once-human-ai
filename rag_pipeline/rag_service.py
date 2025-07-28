@@ -9,6 +9,7 @@ import json
 import logging
 import traceback
 import uuid
+import io
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -17,19 +18,32 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-app = Flask(__name__)
-
 # Initialize ChromaDB
-client = chromadb.PersistentClient(path="/data/chroma_db")
+logger.info("Initializing ChromaDB client...")
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+
+# Use an environment variable for the DB path, defaulting to the container path
+DB_PATH = os.getenv("CHROMA_DB_PATH", "/data/chroma_db")
+logger.info(f"Initializing ChromaDB client at path: {DB_PATH}")
+client = chromadb.PersistentClient(path=DB_PATH)
+logger.info("ChromaDB client initialized.")
+
+# Load the embedding model. This is a one-time operation at startup.
+# The model is downloaded once and cached locally. Subsequent startups load from the cache.
+logger.info("Loading sentence transformer model 'all-MiniLM-L6-v2'. This may take a moment...")
 embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
     model_name="all-MiniLM-L6-v2"
 )
+logger.info("Sentence transformer model loaded successfully.")
 
 # Get or create collection
+logger.info("Getting or creating ChromaDB collection 'once_human_knowledge'...")
 collection = client.get_or_create_collection(
     name="once_human_knowledge",
     embedding_function=embedding_function
 )
+logger.info("Collection ready. Service is now up and running.")
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -205,12 +219,12 @@ def delete_from_database():
 def backup_database():
     try:
         logger.info("Received backup request")
-        db_path = "/data/chroma_db"
+        db_path = os.getenv("CHROMA_DB_PATH", "/data/chroma_db")
         
         if not os.path.exists(db_path):
             return jsonify({'success': False, 'error': 'Database directory not found.'}), 404
 
-        # Create a temporary file to store the archive
+        # Create a temporary file path
         with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
             archive_path = tmp_file.name
         
@@ -219,17 +233,22 @@ def backup_database():
         
         logger.info(f"Successfully created backup archive at {archive_path}")
 
-        # Send the file and schedule it for deletion
-        @after_this_request
-        def cleanup(response):
-            try:
-                os.remove(archive_path)
-                logger.info(f"Successfully cleaned up temporary backup file: {archive_path}")
-            except Exception as e:
-                logger.error(f"Error cleaning up temporary backup file {archive_path}: {e}")
-            return response
+        # Read the archive into memory to release the file lock before sending
+        try:
+            with open(archive_path, 'rb') as f:
+                data = f.read()
+        finally:
+            # Ensure the temporary file is always cleaned up
+            os.remove(archive_path)
+            logger.info(f"Successfully cleaned up temporary backup file: {archive_path}")
 
-        return send_file(archive_path, as_attachment=True, download_name='chroma_db_backup.zip')
+        # Send the in-memory data
+        return send_file(
+            io.BytesIO(data),
+            as_attachment=True,
+            download_name='chroma_db_backup.zip',
+            mimetype='application/zip'
+        )
 
     except Exception as e:
         logger.error(f"Error creating backup: {e}")
@@ -239,5 +258,61 @@ def backup_database():
             'error': str(e)
         }), 500
 
+
+@app.route('/restore', methods=['POST'])
+def restore_database():
+    try:
+        logger.info("Received restore request")
+        
+        if 'backup_file' not in request.files:
+            return jsonify({'success': False, 'error': 'No backup file provided.'}), 400
+        
+        file = request.files['backup_file']
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No selected file.'}), 400
+        
+        if file and file.filename.endswith('.zip'):
+            db_path = "/data/chroma_db"
+            
+            # Ensure the directory exists and is empty
+            if os.path.exists(db_path):
+                shutil.rmtree(db_path)
+            os.makedirs(db_path)
+            
+            # Save the uploaded zip file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+                file.save(tmp_file.name)
+                tmp_zip_path = tmp_file.name
+            
+            # Unzip the file to the database directory
+            shutil.unpack_archive(tmp_zip_path, db_path)
+            
+            # Clean up the temporary zip file
+            os.remove(tmp_zip_path)
+            
+            logger.info("Successfully restored database from backup. Re-initializing client...")
+
+            # Re-initialize the client and collection to load the new data
+            global client, collection
+            client = chromadb.PersistentClient(path=db_path)
+            collection = client.get_or_create_collection(
+                name="once_human_knowledge",
+                embedding_function=embedding_function
+            )
+            
+            logger.info("Database client re-initialized.")
+            return jsonify({'success': True, 'message': 'Database restored and reloaded successfully.'})
+        
+        return jsonify({'success': False, 'error': 'Invalid file format. Please upload a .zip file.'}), 400
+
+    except Exception as e:
+        logger.error(f"Error restoring backup: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
-    app.run(port=5000)
+    app.run(host='0.0.0.0', port=5000)

@@ -11,7 +11,7 @@ from add_data import gemini_structure_data # Import gemini_structure_data
 from dotenv import load_dotenv
 from tqdm import tqdm # Import tqdm
 
-load_dotenv() # Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Configure Gemini API
 # It's recommended to set this as an environment variable:

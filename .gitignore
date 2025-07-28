@@ -32,3 +32,4 @@ lerna-debug.log*
 # Other
 .DS_Store
 Thumbs.db
+chroma_db_backup.zip

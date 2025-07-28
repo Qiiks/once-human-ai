@@ -1,5 +1,4 @@
-unstructured
-chromadb
+chromadb==1.0.15
 sentence-transformers
 numpy
 python-dotenv

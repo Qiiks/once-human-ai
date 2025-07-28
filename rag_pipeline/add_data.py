@@ -6,7 +6,7 @@ import sys
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-load_dotenv() # Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Configure Gemini API
 # It's recommended to set this as an environment variable:
@@ -231,7 +231,7 @@ def classify_chunk(text, gemini_data=None):
 def add_verified_data(text, source):
     """Adds a new verified entry to the ChromaDB collection."""
     print("Initializing ChromaDB client...")
-    chroma_client = chromadb.PersistentClient(path="c:/Users/Sanve/OneDrive/Documents/Code project/rag_pipeline/chroma_db")
+    chroma_client = chromadb.PersistentClient(path="/data/chroma_db")
     print("Initializing embedding function...")
     embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"

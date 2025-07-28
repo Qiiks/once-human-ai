@@ -9,6 +9,11 @@
 .Python
 env/
 venv/
+.venv/
+*/venv/
+*/.venv/
+*/env/
+*env/
 
 # Ignore OS-specific files
 .DS_Store
@@ -18,6 +23,9 @@ Thumbs.db
 *.log
 chroma_db/
 rag_pipeline/gemini_inputs_log/
+
+# Ignore asset directories
+OncehumanPDFs/
 
 # Ignore Git directory
 .git

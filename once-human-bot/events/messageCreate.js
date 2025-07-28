@@ -3,11 +3,14 @@ const { getHistory, addMessage } = require('../utils/chatHistoryManager');
 const axios = require('axios');
 
 // Initialize the RAG system
-const ragSystem = new LocalRAGSystem();
+let ragSystem;
 
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
+        if (!ragSystem) {
+            ragSystem = new LocalRAGSystem(client.keyManager);
+        }
         // Ignore bot messages
         if (message.author.bot) return;
 

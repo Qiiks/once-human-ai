@@ -1,6 +1,6 @@
-require('dotenv').config();
-const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const fs = require('fs');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { LocalRAGSystem } = require('./utils/localRAG');
@@ -20,14 +20,16 @@ client.gameEntities = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'rag
 
 
 // Initialize Google Generative AI
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const keyManager = require('./utils/keyManager');
+const genAI = keyManager.aI;
 client.genAI = genAI; // Attach the main AI instance to the client
+client.keyManager = keyManager;
 client.gemini = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 client.geminiFallback = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 client.embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' }); // Initialize embedding model
 
 // Initialize the RAG System and attach it to the client
-client.ragSystem = new LocalRAGSystem();
+client.ragSystem = new LocalRAGSystem(keyManager);
 
 // Command and Event Handlers
 client.commands = new Collection();
