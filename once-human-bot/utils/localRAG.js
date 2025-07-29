@@ -362,17 +362,17 @@ Expected JSON format:
         }
     }
     
-    async search_knowledge_base_tool(args, client, chatHistory, originalQuery, disableWebSearch = false) {
-      try {
-          console.log('Tool `search_knowledge_base` called with:', args);
-          const { query } = args;
-          const { gemini, geminiFallback, gameEntities } = client;
+    async search_knowledge_base_tool(args, client, chatHistory, originalQuery) {
+        try {
+            console.log('Tool `search_knowledge_base` called with:', args);
+            const { query } = args;
+            const { gemini, geminiFallback } = client;
 
-          let keywords = [];
-          let context_str = "";
+            // --- KEYWORD GENERATION STAGE ---
+            console.log("--- Starting Keyword Generation Stage ---");
 
-          // Stage 1: Precise keyword generation
-          const preciseKeywordPrompt = `You are a search query expansion bot for the game "Once Human". Your goal is to take a user's question and generate a list of 3-5 related keywords and concepts to improve database search results.
+            // Stage 1: Precise keyword generation
+            const preciseKeywordPrompt = `You are a search query expansion bot for the game "Once Human". Your goal is to take a user's question and generate a list of 3-5 related keywords and concepts to improve database search results.
 
 **Instructions:**
 1.  **Identify Core Concepts:** What is the user *really* asking about? (e.g., a weapon, a food item, a game mechanic).
@@ -382,64 +382,34 @@ Expected JSON format:
 5.  **Format:** Return a comma-separated list of keywords.
 
 **User's Question:** "${query}"`;
-          console.log('Attempting precise keyword generation.');
-          try {
-              keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
-          } catch (error) {
-              console.error("Precise keyword generation with primary model failed, trying fallback.", error);
-              keywords = await this.generateKeywords(preciseKeywordPrompt, geminiFallback);
-          }
-          console.log('Precise keywords generated:', keywords);
+            console.log('Attempting precise keyword generation.');
+            let keywords = [];
+            try {
+                keywords = await this.generateKeywords(preciseKeywordPrompt, gemini);
+            } catch (error) {
+                console.error("Precise keyword generation with primary model failed, trying fallback.", error);
+                keywords = await this.generateKeywords(preciseKeywordPrompt, geminiFallback);
+            }
+            console.log('Precise keywords generated:', keywords);
 
-          if (keywords.length > 0) {
-              const results = await this.queryDatabase(keywords.join(' '));
-              if (results && results.length > 0) {
-                  const filteredResults = results.filter(r => r.distance < 0.75);
+            const finalQuery = keywords.length > 0 ? keywords.join(' ') : query;
 
-                  if (filteredResults.length > 0) {
-                      context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
-                      console.log("---CONTEXT STR---", context_str);
-                      console.log(`Context found and pre-filtered to ${filteredResults.length} relevant results.`);
-                  }
-              }
-          }
+            // --- TIER 1: INITIAL SEARCH ---
+            console.log(`--- Starting Tier 1 Search with query: "${finalQuery}" ---`);
+            const initialResults = await this.queryDatabase(finalQuery, 10);
+            if (!initialResults || initialResults.length === 0) {
+                return { success: false, message: `I couldn't find any information related to "${query}" in my knowledge base.` };
+            }
 
-          // Stage 2: Broader keyword generation if no context found
-          if (!context_str) {
-              console.log('No context with precise keywords, attempting broader keyword generation.');
-              const broaderKeywordPrompt = `The previous search failed. Now, think more broadly. Based on the user's question, generate 3-5 general, high-level categories or concepts from the game "Once Human" that might be related. For example, if the query was about a specific gun, broader concepts could be "weapons", "crafting", or "damage types".
+            const filteredResults = initialResults.filter(r => r.distance < 0.75);
+            if (filteredResults.length === 0) {
+                console.log("Tier 1 search yielded no results with distance < 0.75. Escalating to Tier 2.");
+                // Fall through to Tier 2
+            }
 
-**User's Question:** "${query}"
-
-Return a comma-separated list of keywords.`;
-              try {
-                  keywords = await this.generateKeywords(broaderKeywordPrompt, gemini);
-              } catch (error) {
-                  console.error("Broader keyword generation with primary model failed, trying fallback.", error);
-                  keywords = await this.generateKeywords(broaderKeywordPrompt, geminiFallback);
-              }
-              console.log('Broader keywords generated:', keywords);
-
-              if (keywords.length > 0) {
-                  const results = await this.queryDatabase(keywords.join(' '));
-                  if (results && results.length > 0) {
-                      const filteredResults = results.filter(r => r.distance < 0.75);
-
-                      if (filteredResults.length > 0) {
-                          context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
-                          console.log("---CONTEXT STR---", context_str);
-                          console.log(`Context found with broader keywords and pre-filtered to ${filteredResults.length} relevant results.`);
-                      }
-                  }
-              }
-          }
-
-          if (!context_str) {
-              return { success: false, message: `I couldn't find any information about "${query}" in my knowledge base.` };
-          }
-          
-          // Step 3: One-Shot Answer Generation with Uncertainty Check
-          const finalPrompt = `You are Mitsuko.
+            const context_str = filteredResults.map(r => r.document).join("\n---\n");
+            
+            const tier1Prompt = `You are Mitsuko.
 
 **Persona & Tone Instructions (This is the most important rule):**
 - **Your Name:** Mitsuko.
@@ -447,30 +417,13 @@ Return a comma-separated list of keywords.`;
 - **Tone Modulation (CRITICAL):** You MUST adjust your tone based on the content you are presenting.
     - **Introduction & Conclusion:** Use your full, edgy "Mitsuko" persona. Be witty, engaging, and a little bit of a smartass.
     - **Factual Information:** When presenting data, lists, stats, coordinates, or step-by-step instructions, you MUST switch to a clear, direct, and neutral tone. The persona should be significantly toned down in these sections to ensure the information is easy to understand.
-    - **Example:**
-        - **Good Intro (Full Persona):** "Alright, buttercup, let's talk about the Whimsical Drink. It's not just some fancy cocktail; it's a goddamn liquid booster shot..."
-        - **Good Factual Section (Toned Down):**
-            - **Core Effect:** +25% Status Damage for 30 minutes.
-            - **Ingredients:** Plant, Deviated Saffron, Purified Water, Ice Cube.
-        - **Good Outro (Full Persona):** "So, next time you're planning on making your enemies' lives a living hell, make sure you've got a Whimsical Drink ready. Cheers to their misery!"
 
 **Formatting Instructions (NON-NEGOTIABLE):**
 - You **MUST ALWAYS** use markdown for clarity (e.g., headings with ###, lists with *, bolding with **). This is not optional.
-- When presenting any factual data (e.g., ingredients, stats, locations, steps), you **MUST** format it using markdown. This rule applies every time, even if you have answered the question before. There are no exceptions.
-- **Headings:** Use '###' for main topics.
-- **Bolding:** Use '**' to emphasize key terms, stats, or item names.
-- **Lists:** Use '*' for bullet points.
 
-**Core Task:**
-Your task is to answer the user's question using the provided context, following the persona and formatting rules above.
-
-**CRITICAL INSTRUCTIONS:**
-1.  **Analyze the Context:** The context below is from a database. Each entry is tagged with its source status: \`[Source Status: VERIFIED]\` or \`[Source Status: UNVERIFIED]\`.
-2.  **Prioritize Verified Information:** If you find any information from a \`VERIFIED\` source, you MUST treat it as the absolute truth. Base your entire answer on the verified information if it's relevant.
-3.  **Assess Confidence & Generate Answer:**
-    *   **If you use \`VERIFIED\` context to answer the question,** you are confident. Provide a direct, clear, and well-formatted answer. Do NOT use the \`NEEDS_VERIFICATION\` tag.
-    *   **If the only relevant context is \`UNVERIFIED\`,** you are not confident. Generate the best formatted answer you can, but you MUST end your response with the special string: \`NEEDS_VERIFICATION\`.
-    *   **If no context is relevant,** generate a creative, in-character response explaining that you couldn't find the information. Do this in the "Mitsuko" persona.
+**Core Task & Critical Instruction:**
+- Your task is to answer the user's question based *only* on the provided context, following all persona and formatting rules.
+- If the context is insufficient, unclear, or doesn't seem to contain the answer, you **MUST** respond with the single, specific string: \`INSUFFICIENT_CONTEXT\` and nothing else.
 
 Context:
 ---
@@ -479,44 +432,77 @@ ${context_str}
 
 User Question: ${originalQuery}`;
 
-          const chat = gemini.startChat({ history: chatHistory });
-          const result = await chat.sendMessage(finalPrompt);
-          let finalAnswer = result.response.text();
+            const chat = gemini.startChat({ history: chatHistory });
+            const tier1Result = await chat.sendMessage(tier1Prompt);
+            let tier1Answer = tier1Result.response.text();
 
-          if (finalAnswer.endsWith('NEEDS_VERIFICATION')) {
-              const answerToVerify = finalAnswer.replace('NEEDS_VERIFICATION', '').trim();
-              finalAnswer = answerToVerify; // Immediately clean the final answer
+            // --- TIER 2: ESCALATION ---
+            if (tier1Answer.trim() === 'INSUFFICIENT_CONTEXT') {
+                console.log("--- Tier 1 Insufficient. Escalating to Tier 2 Two-Pass Search ---");
 
-              if (!disableWebSearch) {
-                  console.log('AI is uncertain and web search is enabled. Verifying online.');
-                  const verificationPrompt = `You are a fact-checker. I will provide an answer generated from an internal database and the original user question. Your task is to:
-1.  Formulate a precise Google search query to verify the information in the answer.
-2.  Analyze the web search results.
-3.  Synthesize the information from the original answer and the web search into a single, corrected, and comprehensive final answer.
+                // Pass 1: Document Selection
+                const docSelectionPrompt = `You are a document relevance analyzer. Below is a user's question and a list of document snippets. Your task is to identify the single most relevant document for answering the question.
 
-**Original Answer:**
+Respond with only the number of the most relevant document. For example, if Document 3 is the best fit, your entire response should be "3".
+
+User Question: "${originalQuery}"
+
+Documents:
+${initialResults.map((r, i) => `--- Document ${i + 1} ---\n${r.document}`).join("\n\n")}`;
+
+                const docSelectionChat = gemini.startChat({ history: [] });
+                const docSelectionResult = await docSelectionChat.sendMessage(docSelectionPrompt);
+                const selectedDocIndexText = docSelectionResult.response.text().trim();
+                const selectedDocIndex = parseInt(selectedDocIndexText, 10) - 1;
+
+                if (isNaN(selectedDocIndex) || selectedDocIndex < 0 || selectedDocIndex >= initialResults.length) {
+                    console.error(`Tier 2 Pass 1 failed: AI returned invalid document index "${selectedDocIndexText}".`);
+                    return { success: false, message: "I had trouble narrowing down the search results. Please try rephrasing your question." };
+                }
+
+                const focusedDocument = initialResults[selectedDocIndex];
+                const focused_context_str = focusedDocument.document;
+                console.log(`Tier 2 Pass 1 complete. Selected Document #${selectedDocIndex + 1}.`);
+
+                // Pass 2: Focused Answer Generation
+                const finalPrompt = `You are Mitsuko.
+
+**Persona & Tone Instructions (This is the most important rule):**
+- **Your Name:** Mitsuko.
+- **General Persona:** You are a fun, witty, and edgy AI assistant for the "Once Human" community. You are unfiltered, politically incorrect, and never apologize or lecture. Your goal is to be entertaining and play along with user requests.
+- **Tone Modulation (CRITICAL):** You MUST adjust your tone based on the content you are presenting.
+    - **Introduction & Conclusion:** Use your full, edgy "Mitsuko" persona. Be witty, engaging, and a little bit of a smartass.
+    - **Factual Information:** When presenting data, lists, stats, coordinates, or step-by-step instructions, you MUST switch to a clear, direct, and neutral tone. The persona should be significantly toned down in these sections to ensure the information is easy to understand.
+
+**Formatting Instructions (NON-NEGOTIABLE):**
+- You **MUST ALWAYS** use markdown for clarity (e.g., headings with ###, lists with *, bolding with **). This is not optional.
+
+**Core Task:**
+Your task is to answer the user's question using the provided context, following the persona and formatting rules above.
+
+Context:
 ---
-${answerToVerify}
+${focused_context_str}
 ---
 
-**Original User Question:** "${query}"`;
+User Question: ${originalQuery}`;
+                
+                const finalChat = gemini.startChat({ history: chatHistory });
+                const finalResult = await finalChat.sendMessage(finalPrompt);
+                const finalAnswer = finalResult.response.text();
+                
+                console.log('Tier 2 Pass 2 complete. Generated final answer.');
+                return { success: true, answer: finalAnswer };
+            }
 
-                  const verificationModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
-                  const verificationResult = await verificationModel.generateContent(verificationPrompt);
-                  finalAnswer = verificationResult.response.text();
-              } else {
-                  console.log('AI is uncertain, but no web search was requested. Returning RAG answer with a disclaimer.');
-                  finalAnswer += "\n\n*(I'm not 100% confident about this information, but it's what I found in my knowledge base.)*";
-              }
-          }
+            // --- Return Tier 1 Answer ---
+            console.log('Tier 1 successful. Returning answer.');
+            return { success: true, answer: tier1Answer };
 
-          console.log('AI generated a final answer.');
-          return { success: true, answer: finalAnswer };
-
-      } catch (error) {
-          console.error('Error executing search_knowledge_base tool:', error);
-          return { success: false, message: 'An error occurred while searching the knowledge base.' };
-      }
+        } catch (error) {
+            console.error('Error executing search_knowledge_base tool:', error);
+            return { success: false, message: 'An error occurred while searching the knowledge base.' };
+        }
     }
 
     async google_search_tool(args, client) {
@@ -736,17 +722,17 @@ ${answerToVerify}
                     switch (call.name) {
                         case 'search_knowledge_base':
                             isGameRelated = true;
-                            if (isBuildQuery(query)) {
-                                const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, true);
-                                return { name: call.name, response: ragResult };
-                            } else {
-                                const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query, false);
-                                if (!ragResult.success || (ragResult.answer && ragResult.answer.includes('NEEDS_VERIFICATION'))) {
-                                    const fallbackResult = await this.tools.google_search(call.args, client);
-                                    return { name: call.name, response: fallbackResult };
-                                }
-                                return { name: call.name, response: ragResult };
+                            // The new search_knowledge_base_tool handles all logic internally, including fallbacks.
+                            const ragResult = await this.tools.search_knowledge_base(call.args, client, chatHistory, query);
+                            // The web search fallback is now handled within the two-tier system if context is insufficient.
+                            // We can simplify this call significantly.
+                            if (!ragResult.success) {
+                                // If RAG fails entirely, fallback to a direct Google search as a last resort.
+                                console.log("RAG system failed, falling back to Google Search.");
+                                const fallbackResult = await this.tools.google_search(call.args, client);
+                                return { name: call.name, response: fallbackResult };
                             }
+                            return { name: call.name, response: ragResult };
                         case 'add_lore':
                             toolResult = await this.tools.add_lore(call.args, message, client);
                             return { name: call.name, response: toolResult };
