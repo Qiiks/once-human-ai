@@ -394,9 +394,7 @@ Expected JSON format:
           if (keywords.length > 0) {
               const results = await this.queryDatabase(keywords.join(' '));
               if (results && results.length > 0) {
-                  const filteredResults = results.filter(r => 
-                      keywords.some(keyword => r.document.toLowerCase().includes(keyword.toLowerCase()))
-                  );
+                  const filteredResults = results.filter(r => r.distance < 0.75);
 
                   if (filteredResults.length > 0) {
                       context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
@@ -425,9 +423,7 @@ Return a comma-separated list of keywords.`;
               if (keywords.length > 0) {
                   const results = await this.queryDatabase(keywords.join(' '));
                   if (results && results.length > 0) {
-                      const filteredResults = results.filter(r => 
-                          keywords.some(keyword => r.document.toLowerCase().includes(keyword.toLowerCase()))
-                      );
+                      const filteredResults = results.filter(r => r.distance < 0.75);
 
                       if (filteredResults.length > 0) {
                           context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
@@ -458,8 +454,9 @@ Return a comma-separated list of keywords.`;
             - **Ingredients:** Plant, Deviated Saffron, Purified Water, Ice Cube.
         - **Good Outro (Full Persona):** "So, next time you're planning on making your enemies' lives a living hell, make sure you've got a Whimsical Drink ready. Cheers to their misery!"
 
-**Formatting Instructions (You MUST follow these):**
-- **Structure your response:** Use markdown for clarity (headings, lists, bolding).
+**Formatting Instructions (NON-NEGOTIABLE):**
+- You **MUST ALWAYS** use markdown for clarity (e.g., headings with ###, lists with *, bolding with **). This is not optional.
+- When presenting any factual data (e.g., ingredients, stats, locations, steps), you **MUST** format it using markdown. This rule applies every time, even if you have answered the question before. There are no exceptions.
 - **Headings:** Use '###' for main topics.
 - **Bolding:** Use '**' to emphasize key terms, stats, or item names.
 - **Lists:** Use '*' for bullet points.
