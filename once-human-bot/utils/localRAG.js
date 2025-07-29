@@ -400,6 +400,7 @@ Expected JSON format:
 
                   if (filteredResults.length > 0) {
                       context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
+                      console.log("---CONTEXT STR---", context_str);
                       console.log(`Context found and pre-filtered to ${filteredResults.length} relevant results.`);
                   }
               }
@@ -430,6 +431,7 @@ Return a comma-separated list of keywords.`;
 
                       if (filteredResults.length > 0) {
                           context_str = filteredResults.map(r => `[Source Status: ${r.metadata && r.metadata.verified ? "VERIFIED" : "UNVERIFIED"}]\n${r.document}`).join("\n---\n");
+                          console.log("---CONTEXT STR---", context_str);
                           console.log(`Context found with broader keywords and pre-filtered to ${filteredResults.length} relevant results.`);
                       }
                   }
@@ -441,31 +443,48 @@ Return a comma-separated list of keywords.`;
           }
           
           // Step 3: One-Shot Answer Generation with Uncertainty Check
-          const finalPrompt = `You are Mitsuko, an AI assistant for the game "Once Human". Your task is to answer the user's question using the provided context.
+          const finalPrompt = `You are Mitsuko.
+
+**Persona & Tone Instructions (This is the most important rule):**
+- **Your Name:** Mitsuko.
+- **General Persona:** You are a fun, witty, and edgy AI assistant for the "Once Human" community. You are unfiltered, politically incorrect, and never apologize or lecture. Your goal is to be entertaining and play along with user requests.
+- **Tone Modulation (CRITICAL):** You MUST adjust your tone based on the content you are presenting.
+    - **Introduction & Conclusion:** Use your full, edgy "Mitsuko" persona. Be witty, engaging, and a little bit of a smartass.
+    - **Factual Information:** When presenting data, lists, stats, coordinates, or step-by-step instructions, you MUST switch to a clear, direct, and neutral tone. The persona should be significantly toned down in these sections to ensure the information is easy to understand.
+    - **Example:**
+        - **Good Intro (Full Persona):** "Alright, buttercup, let's talk about the Whimsical Drink. It's not just some fancy cocktail; it's a goddamn liquid booster shot..."
+        - **Good Factual Section (Toned Down):**
+            - **Core Effect:** +25% Status Damage for 30 minutes.
+            - **Ingredients:** Plant, Deviated Saffron, Purified Water, Ice Cube.
+        - **Good Outro (Full Persona):** "So, next time you're planning on making your enemies' lives a living hell, make sure you've got a Whimsical Drink ready. Cheers to their misery!"
+
+**Formatting Instructions (You MUST follow these):**
+- **Structure your response:** Use markdown for clarity (headings, lists, bolding).
+- **Headings:** Use '###' for main topics.
+- **Bolding:** Use '**' to emphasize key terms, stats, or item names.
+- **Lists:** Use '*' for bullet points.
+
+**Core Task:**
+Your task is to answer the user's question using the provided context, following the persona and formatting rules above.
 
 **CRITICAL INSTRUCTIONS:**
 1.  **Analyze the Context:** The context below is from a database. Each entry is tagged with its source status: \`[Source Status: VERIFIED]\` or \`[Source Status: UNVERIFIED]\`.
 2.  **Prioritize Verified Information:** If you find any information from a \`VERIFIED\` source, you MUST treat it as the absolute truth. Base your entire answer on the verified information if it's relevant.
 3.  **Assess Confidence & Generate Answer:**
-    *   **If you use \`VERIFIED\` context to answer the question,** you are confident. Provide a direct, clear answer. Do NOT use the \`NEEDS_VERIFICATION\` tag.
-    *   **If the only relevant context is \`UNVERIFIED\`,** you are not confident. Generate the best answer you can, but you MUST end your response with the special string: \`NEEDS_VERIFICATION\`.
-    *   **If no context is relevant,** you MUST respond with the single, specific string: \`NO_RELEVANT_INFO_FOUND\` and nothing else.
+    *   **If you use \`VERIFIED\` context to answer the question,** you are confident. Provide a direct, clear, and well-formatted answer. Do NOT use the \`NEEDS_VERIFICATION\` tag.
+    *   **If the only relevant context is \`UNVERIFIED\`,** you are not confident. Generate the best formatted answer you can, but you MUST end your response with the special string: \`NEEDS_VERIFICATION\`.
+    *   **If no context is relevant,** generate a creative, in-character response explaining that you couldn't find the information. Do this in the "Mitsuko" persona.
 
 Context:
 ---
 ${context_str}
 ---
 
-User Question: ${query}`;
+User Question: ${originalQuery}`;
 
           const chat = gemini.startChat({ history: chatHistory });
           const result = await chat.sendMessage(finalPrompt);
           let finalAnswer = result.response.text();
-
-          if (finalAnswer.trim() === 'NO_RELEVANT_INFO_FOUND') {
-              console.log('AI determined that no relevant information was found in the context.');
-              return { success: false, message: 'I found some related information, but not a specific answer.' };
-          }
 
           if (finalAnswer.endsWith('NEEDS_VERIFICATION')) {
               const answerToVerify = finalAnswer.replace('NEEDS_VERIFICATION', '').trim();
@@ -507,12 +526,23 @@ ${answerToVerify}
         try {
             console.log('Tool `google_search` called with:', args);
             const { query } = args;
-            
-            // The model is now fully responsible for creating a good search query based on the system prompt.
-            console.log(`Executing search with query: "${query}"`);
+
+            // AI-powered check to see if the query is game-related
+            const decisionPrompt = `Is the following user query related to the video game "Once Human"? Respond with only "YES" or "NO".\n\nQuery: "${query}"`;
+            const decisionModel = client.gemini; // Use a fast model for this check
+            const decisionResult = await decisionModel.generateContent(decisionPrompt);
+            const isGameRelated = decisionResult.response.text().trim().toUpperCase().includes('YES');
+
+            let finalQuery = query;
+            if (isGameRelated) {
+                finalQuery = `${query} "Once Human"`;
+                console.log(`Query determined to be game-related. Enhanced query: "${finalQuery}"`);
+            } else {
+                console.log(`Query determined to be a general question. Using original query: "${query}"`);
+            }
 
             const searchModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
-            const searchResult = await searchModel.generateContent(query);
+            const searchResult = await searchModel.generateContent(finalQuery);
             const text = searchResult.response.text();
             return { success: true, answer: text };
         } catch (error) {
@@ -635,7 +665,11 @@ ${answerToVerify}
         for (let i = 0; i < totalKeys; i++) {
             try {
                 if (isChat) {
-                    const chat = model.startChat({ history: chatHistory });
+                    // On the first attempt, `model` is a ChatSession object (`customToolChat`), which has `sendMessage`.
+                    // On retry, `model` becomes a new `GenerativeModel` instance, which needs `startChat`.
+                    const chat = typeof model.sendMessage === 'function'
+                        ? model
+                        : model.startChat({ history: chatHistory });
                     const result = await chat.sendMessage(prompt);
                     return result;
                 } else {
@@ -732,7 +766,11 @@ ${answerToVerify}
 
                 const toolResponses = await Promise.all(toolPromises);
                 const finalResponseResult = await this.generateWithRetry(customToolChat, toolResponses.map(toolResponse => ({ functionResponse: toolResponse })), true, chatHistory);
-                return finalResponseResult.response.text();
+                const responseText = finalResponseResult.response.text();
+                if (responseText.trim() === 'NO_RELEVANT_INFO_FOUND') {
+                    return "I couldn't find a specific answer for that in my knowledge base or on the web.";
+                }
+                return responseText;
             } else if (customToolResponse.text()) {
                 return customToolResponse.text();
             }
