@@ -3,6 +3,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PermissionFlagsBits } = require('discord.js');
+const { analyzeRelevance } = require('./relevanceAnalyzer');
+const { addMemory, getMemories } = require('./memoryManager');
 
 const RAG_SERVICE_URL = 'http://localhost:5000';
 
@@ -95,6 +97,20 @@ const AVAILABLE_TOOLS = {
             required: ['query']
         }
     },
+    save_memory: {
+        name: 'save_memory',
+        description: 'Saves a personal note or memory for the user. Use this when the user says "remember that I..." or "don\'t forget...".',
+        parameters: {
+            type: 'object',
+            properties: {
+                memory: {
+                    type: 'string',
+                    description: 'The personal piece of information to save for the user.'
+                }
+            },
+            required: ['memory']
+        }
+    },
 };
 
 class LocalRAGSystem {
@@ -104,6 +120,7 @@ class LocalRAGSystem {
             search_knowledge_base: this.search_knowledge_base_tool.bind(this),
             google_search: this.google_search_tool.bind(this),
             update_lore: this.update_lore_tool.bind(this),
+            save_memory: this.save_memory_tool.bind(this),
         };
         this.systemPrompt = `You are Mitsuko.
 
@@ -122,6 +139,7 @@ class LocalRAGSystem {
     *   If the user's message contains keywords like "save", "add", "store", "remember this", "log this", you **MUST** call the \`add_lore\` tool.
     *   Do **NOT** provide a conversational reply. Only call the tool. The tool will provide the confirmation message.
     *   You must infer the \`entry_name\` and \`entry_type\` from the user's request.
+    *   If the user says "remember that I..." or "don't forget...", you **MUST** call the \`save_memory\` tool.
 
 2.  **UPDATE INTENT:**
     *   If the user's message contains keywords like "update", "correct", "change", "fix this", you **MUST** call the \`update_lore\` tool.
@@ -286,6 +304,18 @@ Rewrite the original document to incorporate the user's correction. The final ou
         } catch (error) {
             console.error('Error executing update_lore tool:', error);
             return { success: false, message: 'An error occurred while updating lore.' };
+        }
+    }
+
+    async save_memory_tool(args, message) {
+        try {
+            const { memory } = args;
+            const userId = message.author.id;
+            addMemory(userId, memory);
+            return { success: true, message: `I'll remember that for you.` };
+        } catch (error) {
+            console.error('Error executing save_memory tool:', error);
+            return { success: false, message: 'I had trouble remembering that.' };
         }
     }
 
@@ -676,6 +706,25 @@ User Question: ${originalQuery}`;
     async retrieveAndGenerate(query, chatHistory, client, message, youtubeVideoId = null, attachmentData = null) {
         try {
             console.log('Local RAG system: retrieveAndGenerate function called.');
+
+            const userId = message.author.id;
+            const userMemories = getMemories(userId);
+            let relevantMemories = [];
+            if (userMemories.length > 0) {
+                console.log(`Found ${userMemories.length} memories for user ${userId}. Analyzing relevance...`);
+                relevantMemories = await analyzeRelevance(query, userMemories);
+                console.log(`Found ${relevantMemories.length} relevant memories.`);
+            }
+
+            let finalSystemPrompt = this.systemPrompt;
+            if (relevantMemories.length > 0) {
+                const memoryContext = `
+
+**Relevant User Memories (Use this information to personalize your response):**
+- ${relevantMemories.join('\n- ')}
+`;
+                finalSystemPrompt += memoryContext;
+            }
             
             let model = client.gemini;
             let isGameRelated = false;
@@ -708,8 +757,9 @@ User Question: ${originalQuery}`;
                     AVAILABLE_TOOLS.search_knowledge_base,
                     AVAILABLE_TOOLS.google_search,
                     AVAILABLE_TOOLS.update_lore,
+                    AVAILABLE_TOOLS.save_memory,
                 ] }],
-                systemInstruction: { role: 'system', parts: [{ text: this.systemPrompt }] },
+                systemInstruction: { role: 'system', parts: [{ text: finalSystemPrompt }] },
             });
 
             const customToolResult = await this.generateWithRetry(customToolChat, query, true, chatHistory);
@@ -741,6 +791,9 @@ User Question: ${originalQuery}`;
                             return { name: call.name, response: toolResult };
                         case 'update_lore':
                             toolResult = await this.tools.update_lore(call.args, message, client);
+                            return { name: call.name, response: toolResult };
+                        case 'save_memory':
+                            toolResult = await this.tools.save_memory(call.args, message);
                             return { name: call.name, response: toolResult };
                         default:
                             return { name: call.name, response: { success: false, message: 'Unknown tool.' } };
