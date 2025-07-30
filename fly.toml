@@ -9,25 +9,14 @@ primary_region = "sin" # Example region, choose one close to you or your users
 [vm]
   size = "shared-cpu-4x" # 1GB RAM
 
-[processes]
-  rag = "python3 /app/rag_pipeline/rag_service.py"
-  bot = "node /app/once-human-bot/index.js"
-
-[[services]]
+[http_service]
   internal_port = 5000
-  processes = ["rag"]
-  protocol = "tcp"
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
 
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-    force_https = true
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
-
-  [[services.checks]]
+  [[http_service.checks]]
     interval = "10s"
     timeout = "2s"
     grace_period = "5s"
