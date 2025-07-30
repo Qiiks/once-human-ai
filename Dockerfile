@@ -48,8 +48,4 @@ COPY . .
 EXPOSE 5000
 
 # Copy the entrypoint script and make it executable
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# Set the entrypoint to our new script
-CMD ["/app/entrypoint.sh"]
+# The entrypoint is now handled by the processes in fly.toml
