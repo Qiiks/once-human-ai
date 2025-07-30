@@ -20,11 +20,12 @@ class ExecutionEngine {
 
     async web_search(parameters) {
         console.log(`Searching the web for: ${parameters.query}`);
-        const result = await this.ragSystem.google_search_tool(parameters, this.client);
+        const result = await this.ragSystem.direct_google_search(parameters, this.client);
         if (result.success) {
-            return result.answer;
+            // Split the answer by newlines to create an array of items
+            return result.answer.split('\n').filter(item => item.trim() !== '');
         } else {
-            return result.message;
+            return [result.message]; // Return as an array to avoid breaking the loop
         }
     }
 }

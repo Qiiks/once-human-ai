@@ -257,7 +257,7 @@ Expected JSON format:
             if (!queryResults || queryResults.length === 0) {
                 return { success: false, message: `I couldn't find any entries related to "${entry_name}" to update.` };
             }
-            const originalEntry = queryResults[0];
+            const originalEntry = queryResults;
             const originalName = originalEntry.metadata.name;
 
             // Step 2: AI-powered name verification
@@ -332,11 +332,11 @@ Rewrite the original document to incorporate the user's correction. The final ou
 
             // 1. Fetch the existing document
             const queryResults = await this.queryDatabase(entry_name, 1);
-            if (!queryResults || queryResults.length === 0 || queryResults[0].metadata.name !== entry_name) {
+            if (!queryResults || queryResults.length === 0 || queryResults.metadata.name !== entry_name) {
                 return { success: false, message: `I couldn't find an exact match for an entry named "${entry_name}".` };
             }
 
-            const existingEntry = queryResults[0];
+            const existingEntry = queryResults;
             const content_to_structure = existingEntry.document;
 
             // 2. Re-run the AI structuring process
@@ -558,12 +558,26 @@ User Question: ${originalQuery}`;
                 console.log(`Query determined to be a general question. Using original query: "${query}"`);
             }
 
-            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
+            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-1.5-flash", tools: [groundingTool] });
             const searchResult = await searchModel.generateContent(finalQuery);
             const text = searchResult.response.text();
             return { success: true, answer: text };
         } catch (error) {
             console.error('Error executing google_search tool:', error);
+            return { success: false, message: 'An error occurred while searching the web.' };
+        }
+    }
+
+    async direct_google_search(args, client) {
+        try {
+            console.log('Tool `direct_google_search` called with:', args);
+            const { query } = args;
+            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-1.5-flash", tools: [groundingTool] });
+            const searchResult = await searchModel.generateContent(query);
+            const text = searchResult.response.text();
+            return { success: true, answer: text };
+        } catch (error) {
+            console.error('Error executing direct_google_search tool:', error);
             return { success: false, message: 'An error occurred while searching the web.' };
         }
     }

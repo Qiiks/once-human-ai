@@ -15,7 +15,10 @@ class ResearchManager {
         let step = state.getNextStep();
         while (step) {
             if (step.iterate_over) {
-                const items = state.getCollectedData()[step.iterate_over];
+                let items = state.getCollectedData()[step.iterate_over];
+                if (!Array.isArray(items)) {
+                    items = [items];
+                }
                 const results = {};
                 for (const item of items) {
                     const newStep = JSON.parse(JSON.stringify(step));
