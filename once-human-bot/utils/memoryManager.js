@@ -5,23 +5,37 @@ const userMemories = new Map();
 /**
  * Adds a memory for a specific user.
  * @param {string} userId The ID of the user.
- * @param {string} memory The memory to add.
+ * @param {string} key The key for the memory.
+ * @param {string} value The memory to add.
  */
-function addMemory(userId, memory) {
+function addMemory(userId, key, value) {
     if (!userMemories.has(userId)) {
-        userMemories.set(userId, []);
+        userMemories.set(userId, new Map());
     }
-    userMemories.get(userId).push(memory);
-    console.log(`Added memory for user ${userId}: "${memory}"`);
+    userMemories.get(userId).set(key, value);
+    console.log(`Added memory for user ${userId}: "${key}: ${value}"`);
 }
 
 /**
  * Retrieves all memories for a specific user.
  * @param {string} userId The ID of the user.
- * @returns {string[]} A list of the user's memories.
+ * @returns {Map<string, string>} A map of the user's memories.
  */
 function getMemories(userId) {
-    return userMemories.get(userId) || [];
+    return userMemories.get(userId) || new Map();
 }
 
-module.exports = { addMemory, getMemories };
+/**
+ * Deletes a memory for a specific user.
+ * @param {string} userId The ID of the user.
+ * @param {string} key The key of the memory to delete.
+ * @returns {boolean} True if a memory was deleted, false otherwise.
+ */
+function deleteMemory(userId, key) {
+    if (userMemories.has(userId)) {
+        return userMemories.get(userId).delete(key);
+    }
+    return false;
+}
+
+module.exports = { addMemory, getMemories, deleteMemory };

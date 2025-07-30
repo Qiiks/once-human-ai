@@ -12,12 +12,22 @@ class ResearchManager {
         const state = new StateTracker(query);
         state.setPlan(plan);
 
-        while (!state.isComplete()) {
-            const step = state.getNextStep();
-            if (step) {
+        let step = state.getNextStep();
+        while (step) {
+            if (step.iterate_over) {
+                const items = state.getCollectedData()[step.iterate_over];
+                const results = {};
+                for (const item of items) {
+                    const newStep = JSON.parse(JSON.stringify(step));
+                    newStep.parameters.query = newStep.parameters.query.replace('{item}', item);
+                    results[item] = await this.engine.execute(newStep);
+                }
+                state.updateStepResult(step.stepId, results);
+            } else {
                 const result = await this.engine.execute(step);
                 state.updateStepResult(step.stepId, result);
             }
+            step = state.getNextStep();
         }
 
         return state.getCollectedData();

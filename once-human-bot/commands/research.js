@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const ResearchManager = require('../utils/research/ResearchManager');
+const { sendReply } = require('../utils/messageUtils');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -43,7 +44,8 @@ module.exports = {
                 await i.update({ content: 'Research in progress...', components: [] });
                 try {
                     const results = await researchManager.research(query, plan);
-                    await interaction.followUp({ content: JSON.stringify(results, null, 2) });
+                    const resultString = JSON.stringify(results, null, 2);
+                    await sendReply(interaction, resultString);
                 } catch (error) {
                     console.error(error);
                     await interaction.followUp({ content: 'An error occurred during the research process.' });

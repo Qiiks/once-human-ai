@@ -103,12 +103,16 @@ const AVAILABLE_TOOLS = {
         parameters: {
             type: 'object',
             properties: {
-                memory: {
+                key: {
+                    type: 'string',
+                    description: 'A short, one-word key for the memory (e.g., "main", "favorite_food").'
+                },
+                value: {
                     type: 'string',
                     description: 'The personal piece of information to save for the user.'
                 }
             },
-            required: ['memory']
+            required: ['key', 'value']
         }
     },
 };
@@ -309,9 +313,9 @@ Rewrite the original document to incorporate the user's correction. The final ou
 
     async save_memory_tool(args, message) {
         try {
-            const { memory } = args;
+            const { key, value } = args;
             const userId = message.author.id;
-            addMemory(userId, memory);
+            addMemory(userId, key, value);
             return { success: true, message: `I'll remember that for you.` };
         } catch (error) {
             console.error('Error executing save_memory tool:', error);

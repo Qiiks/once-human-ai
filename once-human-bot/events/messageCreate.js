@@ -1,6 +1,7 @@
 const { LocalRAGSystem } = require('../utils/localRAG');
 const { getHistory, addMessage } = require('../utils/chatHistoryManager');
 const axios = require('axios');
+const { sendReply } = require('../utils/messageUtils');
 
 // Initialize the RAG system
 let ragSystem;
@@ -88,8 +89,8 @@ module.exports = {
             let youtubeVideoId = null;
             const youtubeRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
             const match = query.match(youtubeRegex);
-            if (match && match[1]) {
-                youtubeVideoId = match[1];
+            if (match && match) {
+                youtubeVideoId = match;
                 console.log(`Extracted YouTube Video ID: ${youtubeVideoId}`);
             }
             // --- End of New Logic ---
@@ -148,44 +149,8 @@ module.exports = {
                 }
             }
 
-            // Send response, splitting if necessary
-            if (processedResponse.length <= 2000) {
-                console.log('Final response content to be sent/edited:', processedResponse);
-                await thinkingMessage.edit(processedResponse);
-                console.log('Successfully edited thinking message');
-            } else {
-                console.log('Response is too long, splitting into multiple messages.');
-                const chunks = [];
-                let tempStr = processedResponse;
-                while (tempStr.length > 0) {
-                    if (tempStr.length <= 2000) {
-                        chunks.push(tempStr);
-                        break;
-                    }
-                    // Find the last newline before the 2000 character limit
-                    let splitIndex = tempStr.lastIndexOf('\n', 2000);
-                    // If no newline is found, find the last space
-                    if (splitIndex === -1) {
-                        splitIndex = tempStr.lastIndexOf(' ', 2000);
-                    }
-                    // If no space is found, just split at 2000
-                    if (splitIndex === -1) {
-                        splitIndex = 2000;
-                    }
-                    chunks.push(tempStr.substring(0, splitIndex));
-                    tempStr = tempStr.substring(splitIndex).trim();
-                }
-
-                // Send the first chunk by editing the "Thinking..." message
-                await thinkingMessage.edit(chunks[0]);
-                console.log('Successfully edited thinking message with the first chunk.');
-
-                // Send the rest of the chunks as new messages
-                for (let i = 1; i < chunks.length; i++) {
-                    await message.channel.send(chunks[i]);
-                    console.log(`Sent chunk ${i + 1}/${chunks.length}`);
-                }
-            }
+            // Use the new sendReply utility
+            await sendReply(thinkingMessage, processedResponse);
 
         } catch (error) {
             console.error('Error in messageCreate execution:', error);
