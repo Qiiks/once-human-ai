@@ -558,7 +558,7 @@ User Question: ${originalQuery}`;
                 console.log(`Query determined to be a general question. Using original query: "${query}"`);
             }
 
-            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-1.5-flash", tools: [groundingTool] });
+            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
             const searchResult = await searchModel.generateContent(finalQuery);
             const text = searchResult.response.text();
             return { success: true, answer: text };
@@ -572,7 +572,7 @@ User Question: ${originalQuery}`;
         try {
             console.log('Tool `direct_google_search` called with:', args);
             const { query } = args;
-            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-1.5-flash", tools: [groundingTool] });
+            const searchModel = client.genAI.getGenerativeModel({ model: "gemini-2.5-flash", tools: [groundingTool] });
             const searchResult = await searchModel.generateContent(query);
             const text = searchResult.response.text();
             return { success: true, answer: text };
