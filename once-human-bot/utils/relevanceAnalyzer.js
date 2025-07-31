@@ -6,7 +6,7 @@ const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 
 function getPrompt(query, memories) {
-    return `You are a helpful and intelligent assistant responsible for analyzing a user's memories to determine their relevance to a given query. Your goal is to identify memories that could provide useful context for a larger, more powerful AI that has access to a comprehensive knowledge base (RAG).
+    return `You are a helpful and intelligent assistant responsible for analyzing a user's memories to determine their relevance to a given query. Your goal is to identify memories that could provide useful context for a larger, more powerful AI that has access to a comprehensive knowledge base (RAG). The user is asking about the video game 'Once Human', a multiplayer open-world survival game. Your reasoning should be within the context of this game.
 
 The connection between a memory and the query may not be direct. You need to think step-by-step about how a memory might be related, even if it requires a reasoning leap.
 
@@ -77,18 +77,24 @@ async function analyzeWithGemini(prompt) {
 
 async function analyzeRelevance(query, memories) {
     const prompt = getPrompt(query, memories);
+    const relevanceModel = process.env.RELEVANCE_MODEL || 'MISTRAL';
 
-    console.log("Attempting relevance analysis with Mistral...");
-    let relevantMemories = await analyzeWithMistral(prompt);
+    let relevantMemories = null;
 
-    if (relevantMemories === null || relevantMemories.length === 0) {
-        console.log("Mistral analysis failed or returned no relevant memories. Falling back to Gemini...");
+    if (relevanceModel === 'MISTRAL') {
+        console.log("Attempting relevance analysis with Mistral...");
+        relevantMemories = await analyzeWithMistral(prompt);
+    } else if (relevanceModel === 'GEMINI') {
+        console.log("Attempting relevance analysis with Gemini...");
         relevantMemories = await analyzeWithGemini(prompt);
+    } else {
+        console.error(`Invalid RELEVANCE_MODEL specified: ${relevanceModel}. Defaulting to original memories.`);
+        return memories;
     }
 
     if (relevantMemories === null) {
-        console.log("All relevance analysis models failed. Returning original memories as a final fallback.");
-        return memories; // Final fallback
+        console.log("Relevance analysis failed. Returning original memories as a fallback.");
+        return memories; // Fallback
     }
 
     return relevantMemories;
