@@ -728,8 +728,8 @@ User Question: ${originalQuery}`;
             const userId = message.author.id;
             const userMemories = getMemories(userId);
             let relevantMemories = [];
-            if (userMemories.length > 0) {
-                console.log(`Found ${userMemories.length} memories for user ${userId}. Analyzing relevance...`);
+            if (userMemories.size > 0) {
+                console.log(`Found ${userMemories.size} memories for user ${userId}. Analyzing relevance...`);
                 relevantMemories = await analyzeRelevance(query, userMemories);
                 console.log(`Found ${relevantMemories.length} relevant memories.`);
             }

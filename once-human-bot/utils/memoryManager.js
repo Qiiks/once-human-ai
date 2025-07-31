@@ -1,19 +1,15 @@
-// A simple in-memory store for user memories.
-// In a real application, this would be backed by a persistent database.
-const userMemories = new Map();
+const db = require('./database');
 
 /**
- * Adds a memory for a specific user.
+ * Adds or updates a memory for a specific user.
  * @param {string} userId The ID of the user.
  * @param {string} key The key for the memory.
- * @param {string} value The memory to add.
+ * @param {string} value The memory to add or update.
  */
 function addMemory(userId, key, value) {
-    if (!userMemories.has(userId)) {
-        userMemories.set(userId, new Map());
-    }
-    userMemories.get(userId).set(key, value);
-    console.log(`Added memory for user ${userId}: "${key}: ${value}"`);
+    const stmt = db.prepare('INSERT OR REPLACE INTO memories (userId, key, value) VALUES (?, ?, ?)');
+    stmt.run(userId, key, value);
+    console.log(`Added/updated memory for user ${userId}: "${key}: ${value}"`);
 }
 
 /**
@@ -22,7 +18,13 @@ function addMemory(userId, key, value) {
  * @returns {Map<string, string>} A map of the user's memories.
  */
 function getMemories(userId) {
-    return userMemories.get(userId) || new Map();
+    const stmt = db.prepare('SELECT key, value FROM memories WHERE userId = ?');
+    const rows = stmt.all(userId);
+    const memories = new Map();
+    for (const row of rows) {
+        memories.set(row.key, row.value);
+    }
+    return memories;
 }
 
 /**
@@ -32,10 +34,26 @@ function getMemories(userId) {
  * @returns {boolean} True if a memory was deleted, false otherwise.
  */
 function deleteMemory(userId, key) {
-    if (userMemories.has(userId)) {
-        return userMemories.get(userId).delete(key);
-    }
-    return false;
+    const stmt = db.prepare('DELETE FROM memories WHERE userId = ? AND key = ?');
+    const result = stmt.run(userId, key);
+    return result.changes > 0;
 }
 
-module.exports = { addMemory, getMemories, deleteMemory };
+/**
+ * Retrieves all memories for all users.
+ * @returns {Map<string, Map<string, string>>} A map where keys are user IDs and values are maps of their memories.
+ */
+function getAllMemories() {
+    const stmt = db.prepare('SELECT userId, key, value FROM memories');
+    const rows = stmt.all();
+    const allMemories = new Map();
+    for (const row of rows) {
+        if (!allMemories.has(row.userId)) {
+            allMemories.set(row.userId, new Map());
+        }
+        allMemories.get(row.userId).set(row.key, row.value);
+    }
+    return allMemories;
+}
+
+module.exports = { addMemory, getMemories, deleteMemory, getAllMemories };
