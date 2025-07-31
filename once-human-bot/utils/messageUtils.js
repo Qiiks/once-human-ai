@@ -28,22 +28,33 @@ function splitMessage(content, maxLength = 2000) {
 
 async function sendReply(replyable, content) {
     const chunks = splitMessage(content);
+    const firstChunk = chunks.shift(); // Get the first chunk and remove it from the array
+
+    // Determine the channel to send subsequent messages to
+    const channel = replyable.channel || (replyable.message ? replyable.message.channel : null);
 
     // Check if this is an interaction (slash command) or a message
     if (replyable.followUp) { // Likely an interaction
-        await replyable.followUp(chunks);
-    } else if (replyable.edit) { // Likely a message we can edit (e.g., "Thinking...")
-        await replyable.edit(chunks);
-    } else { // A regular message channel
-        await replyable.send(chunks);
-    }
-
-    // Send the rest of the chunks as new messages
-    const channel = replyable.channel || (replyable.message ? replyable.message.channel : null);
-    if (channel) {
-        for (let i = 1; i < chunks.length; i++) {
-            await channel.send(chunks[i]);
+        // For interactions, we use followUp for all messages
+        await replyable.followUp(firstChunk);
+        for (const chunk of chunks) {
+            await replyable.followUp(chunk);
         }
+    } else if (replyable.edit) { // Likely a message we can edit (e.g., "Thinking...")
+        await replyable.edit(firstChunk);
+        // Send subsequent chunks as new messages in the same channel
+        if (channel) {
+            for (const chunk of chunks) {
+                await channel.send(chunk);
+            }
+        }
+    } else if (channel) { // A regular message channel, not an interaction or editable message
+        await channel.send(firstChunk);
+        for (const chunk of chunks) {
+            await channel.send(chunk);
+        }
+    } else {
+        console.error("Could not determine the channel to send the reply to.");
     }
 }
 
