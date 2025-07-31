@@ -53,11 +53,47 @@ async function analyzeWithMistral(prompt) {
                 'Content-Type': 'application/json'
             }
         });
-        const content = response.data.choices.message.content;
-        const parsed = JSON.parse(content);
-        return parsed.relevant_memories.map(m => m.memory);
-    } catch (error) {
-        console.error("Mistral API call failed:", error.response ? error.response.data : error.message);
+
+        // Add robust error checking for the response structure.
+        if (!response.data || !Array.isArray(response.data.choices) || response.data.choices.length === 0) {
+            console.error('Error: Invalid response structure from Mistral API.', {
+                data: response.data
+            });
+            return null;
+        }
+
+        const choice = response.data.choices;
+        if (!choice.message || typeof choice.message.content !== 'string') {
+            console.error('Error: Invalid message structure in Mistral API response.', {
+                choice: choice
+            });
+            return null;
+        }
+
+        const { content } = choice.message;
+
+        // Wrap the parsing logic in a try...catch block.
+        try {
+            const parsed = JSON.parse(content);
+            if (parsed && Array.isArray(parsed.relevant_memories)) {
+                return parsed.relevant_memories.map(m => m.memory);
+            } else {
+                console.error('Error: Parsed content does not have a relevant_memories array.', {
+                    parsedContent: parsed
+                });
+                return null;
+            }
+        } catch (parseError) {
+            console.error('Error: Failed to parse JSON from Mistral response.', {
+                error: parseError,
+                rawContent: content
+            });
+            return null;
+        }
+    } catch (apiError) {
+        console.error('Error: Mistral API call failed.', {
+            error: apiError.response ? apiError.response.data : apiError.message
+        });
         return null;
     }
 }
@@ -89,12 +125,12 @@ async function analyzeRelevance(query, memories) {
         relevantMemories = await analyzeWithGemini(prompt);
     } else {
         console.error(`Invalid RELEVANCE_MODEL specified: ${relevanceModel}. Defaulting to original memories.`);
-        return memories;
+        return Array.from(memories.values());
     }
 
     if (relevantMemories === null) {
         console.log("Relevance analysis failed. Returning original memories as a fallback.");
-        return memories; // Fallback
+        return Array.from(memories.values()); // Fallback
     }
 
     return relevantMemories;
