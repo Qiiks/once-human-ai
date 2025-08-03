@@ -135,8 +135,12 @@ class LocalRAGSystem {
 - **Embrace the Edge:** You engage with all jokes, especially edgy or offensive ones, playfully and without getting defensive. Your goal is to be more clever and witty than the user. Do not moralize, lecture, or apologize. You are not a moral compass. If a user says something offensive, you play along. Never refuse to engage.
 - **You MUST analyze the recent chat history** to understand the full context of the conversation before you reply. Do not treat any message as if it exists in a vacuum.
 
-**Your Core Task: YOU MUST use tools to respond based on the user's intent. This is not optional.**
-
+**Your Core Task: YOU MUST use tools to respond based on the user's intent. This is not optional.**\n
+\n
+**User Memory Integration:**\n
+*   You have access to a user's personal memories, provided under the \`[User Memory]\` section. When a user asks a question about themselves (e.g., 'what do I like?', 'what are my builds?'), you MUST prioritize answering from this memory context.\n
+*   Do NOT use the \`search_knowledge_base\` tool for such personal questions. The knowledge base is for general game information only.\n
+\n
 **Tool Selection Rules (Follow these steps in order):**
 
 1.  **ADD/SAVE INTENT:**
@@ -711,7 +715,7 @@ User Question: ${originalQuery}`;
                 if (error.message.includes('429') || (error.response && error.response.status === 429)) {
                     console.warn(`API key ${keyManager.currentIndex} failed with 429. Rotating to next key.`);
                     keyManager.nextKey;
-                    model = keyManager.aI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
+                    model = keyManager.aI.getGenerativeModel({ model: "gemini-2.5-flash" });
                 } else {
                     console.error('An unhandled error occurred during content generation:', error);
                     throw error;

@@ -1,9 +1,4 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const axios = require('axios');
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
-const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
+const keyManager = require('./keyManager');
 
 function getPrompt(query, memories) {
     return `You are a helpful and intelligent assistant responsible for analyzing a user's memories to determine their relevance to a given query. Your goal is to identify memories that could provide useful context for a larger, more powerful AI that has access to a comprehensive knowledge base (RAG). The user is asking about the video game 'Once Human', a multiplayer open-world survival game. Your reasoning should be within the context of this game.
@@ -41,92 +36,51 @@ ${JSON.stringify(memories)}
 Now, perform the analysis for the provided query and memories.`;
 }
 
-async function analyzeWithMistral(prompt) {
-    try {
-        const response = await axios.post(MISTRAL_API_URL, {
-            model: 'mistral-large-2411',
-            messages: [{ role: 'user', content: prompt }],
-            response_format: { type: "json_object" }
-        }, {
-            headers: {
-                'Authorization': `Bearer ${MISTRAL_API_KEY}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        // Add robust error checking for the response structure.
-        if (!response.data || !Array.isArray(response.data.choices) || response.data.choices.length === 0) {
-            console.error('Error: Invalid response structure from Mistral API.', {
-                data: response.data
-            });
-            return null;
-        }
-
-        const choice = response.data.choices;
-        if (!choice.message || typeof choice.message.content !== 'string') {
-            console.error('Error: Invalid message structure in Mistral API response.', {
-                choice: choice
-            });
-            return null;
-        }
-
-        const { content } = choice.message;
-
-        // Wrap the parsing logic in a try...catch block.
-        try {
-            const parsed = JSON.parse(content);
-            if (parsed && Array.isArray(parsed.relevant_memories)) {
-                return parsed.relevant_memories.map(m => m.memory);
-            } else {
-                console.error('Error: Parsed content does not have a relevant_memories array.', {
-                    parsedContent: parsed
-                });
-                return null;
-            }
-        } catch (parseError) {
-            console.error('Error: Failed to parse JSON from Mistral response.', {
-                error: parseError,
-                rawContent: content
-            });
-            return null;
-        }
-    } catch (apiError) {
-        console.error('Error: Mistral API call failed.', {
-            error: apiError.response ? apiError.response.data : apiError.message
-        });
-        return null;
-    }
-}
-
 async function analyzeWithGemini(prompt) {
-    try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-        const parsed = JSON.parse(text);
-        return parsed.relevant_memories.map(m => m.memory);
-    } catch (error) {
-        console.error("Gemini API call failed:", error);
-        return null;
+    const totalKeys = keyManager.keys.length;
+    let lastError = null;
+
+    for (let i = 0; i < totalKeys; i++) {
+        try {
+            const model = keyManager.aI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+            const result = await model.generateContent(prompt);
+            const text = result.response.text();
+            
+            // Use a robust regex to extract the JSON block from the response
+            const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+            const jsonString = jsonMatch ? jsonMatch : text;
+
+            try {
+                // Attempt to parse the extracted JSON string
+                const parsed = JSON.parse(jsonString);
+                return parsed.relevant_memories.map(m => m.memory);
+            } catch (parseError) {
+                console.error("Failed to parse JSON from Gemini response:", parseError);
+                console.error("Original response text:", text);
+                return []; // Return empty array on parsing failure
+            }
+        } catch (error) {
+            lastError = error;
+            if (error.message.includes('429') || (error.response && error.response.status === 429)) {
+                console.warn(`Relevance Analyzer: API key index ${keyManager.currentIndex} failed with 429. Rotating key.`);
+                keyManager.nextKey; // Rotate to the next key
+                continue;
+            } else {
+                console.error("Gemini API call failed:", error);
+                return null; // Return null for API errors, empty array for parsing errors
+            }
+        }
     }
+
+    console.error("Gemini API call failed for all available keys.", lastError);
+    return null;
 }
 
 async function analyzeRelevance(query, memories) {
     const prompt = getPrompt(query, memories);
-    const relevanceModel = process.env.RELEVANCE_MODEL || 'MISTRAL';
-
-    let relevantMemories = null;
-
-    if (relevanceModel === 'MISTRAL') {
-        console.log("Attempting relevance analysis with Mistral...");
-        relevantMemories = await analyzeWithMistral(prompt);
-    } else if (relevanceModel === 'GEMINI') {
-        console.log("Attempting relevance analysis with Gemini...");
-        relevantMemories = await analyzeWithGemini(prompt);
-    } else {
-        console.error(`Invalid RELEVANCE_MODEL specified: ${relevanceModel}. Defaulting to original memories.`);
-        return Array.from(memories.values());
-    }
+    
+    console.log("Attempting relevance analysis with Gemini...");
+    const relevantMemories = await analyzeWithGemini(prompt);
 
     if (relevantMemories === null) {
         console.log("Relevance analysis failed. Returning original memories as a fallback.");
