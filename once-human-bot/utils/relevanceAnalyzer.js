@@ -45,10 +45,17 @@ async function analyzeWithGemini(prompt) {
             const model = keyManager.aI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
             const result = await model.generateContent(prompt);
             const text = result.response.text();
+            console.log("Gemini Raw Response:", text);
             
             // Use a robust regex to extract the JSON block from the response
-            const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-            const jsonString = jsonMatch ? jsonMatch : text;
+            // This handles both ```json and ``` code blocks
+            const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            let jsonString = jsonMatch ? jsonMatch[1] : text;
+            
+            // If the regex fails, try to strip the markdown formatting manually
+            if (!jsonMatch) {
+                jsonString = jsonString.replace(/```json/g, '').replace(/```/g, '').trim();
+            }
 
             try {
                 // Attempt to parse the extracted JSON string
@@ -57,6 +64,7 @@ async function analyzeWithGemini(prompt) {
             } catch (parseError) {
                 console.error("Failed to parse JSON from Gemini response:", parseError);
                 console.error("Original response text:", text);
+                console.error("Extracted JSON string:", jsonString);
                 return []; // Return empty array on parsing failure
             }
         } catch (error) {

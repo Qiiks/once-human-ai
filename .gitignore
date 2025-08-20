@@ -39,3 +39,6 @@ rag_pipeline/backupppp/
 rag_pipeline/rag_pipeline/backups/
 once-human-bot/config/channelConfig.json
 Code project.code-workspace
+test_relevance_analyzer.js
+simple_test_relevance.js
+debug_relevance.js
