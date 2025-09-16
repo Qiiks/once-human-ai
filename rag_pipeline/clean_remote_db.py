@@ -3,8 +3,9 @@ from collections import defaultdict
 from tqdm import tqdm
 
 # --- Configuration ---
-# IMPORTANT: Ensure this is your actual Fly.io app URL
-REMOTE_URL = "https://once-human-bot-and-rag.fly.dev"
+# IMPORTANT: Set `REMOTE_URL` to your deployed RAG service URL (e.g., Coolify).
+# It can be provided via the environment variable `REMOTE_URL`.
+REMOTE_URL = "https://your-rag-service.example.com"
 
 def fetch_all_documents(base_url):
     """Fetches all documents from the specified RAG service."""

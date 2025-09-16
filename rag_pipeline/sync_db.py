@@ -7,8 +7,9 @@ import datetime
 
 # --- Configuration ---
 LOCAL_URL = "http://localhost:5000"
-# IMPORTANT: Replace with your actual Fly.io app URL
-REMOTE_URL = "https://once-human-bot-and-rag.fly.dev"
+# IMPORTANT: Set `REMOTE_URL` to your deployed RAG service URL (e.g., Coolify).
+# It can be provided via the environment variable `REMOTE_URL`.
+REMOTE_URL = os.environ.get('REMOTE_URL', "https://your-rag-service.example.com")
 BACKUP_DIR = "rag_pipeline/backups"
 
 def fetch_all_documents(base_url):

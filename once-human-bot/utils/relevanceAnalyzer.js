@@ -1,7 +1,7 @@
 const keyManager = require('./keyManager');
 
 function getPrompt(query, memories) {
-    return `You are a helpful and intelligent assistant responsible for analyzing a user's memories to determine their relevance to a given query. Your goal is to identify memories that could provide useful context for a larger, more powerful AI that has access to a comprehensive knowledge base (RAG). The user is asking about the video game 'Once Human', a multiplayer open-world survival game. Your reasoning should be within the context of this game.
+        return `You are a helpful and intelligent assistant responsible for analyzing a user's memories to determine their relevance to a given query. Your goal is to identify memories that could provide useful context for a larger, more powerful AI that has access to a comprehensive knowledge base (RAG). The user is asking about the video game 'Once Human', a multiplayer open-world survival game. Your reasoning should be within the context of this game.
 
 The connection between a memory and the query may not be direct. You need to think step-by-step about how a memory might be related, even if it requires a reasoning leap.
 
@@ -9,7 +9,7 @@ The connection between a memory and the query may not be direct. You need to thi
 "${query}"
 
 **User Memories:**
-${JSON.stringify(memories)}
+${JSON.stringify(Array.from(memories.entries()))}
 
 **Your Task:**
 
@@ -25,12 +25,12 @@ ${JSON.stringify(memories)}
 
 **Your JSON Output:**
 {
-  "relevant_memories": [
-    {
-      "memory": "mains boom boom",
-      "reason": "The user's memory 'mains boom boom' likely refers to a game build. The main model can access the RAG to find build details, which would include information on pant mods for that build."
-    }
-  ]
+    "relevant_memories": [
+        {
+            "memory": "mains boom boom",
+            "reason": "The user's memory 'mains boom boom' likely refers to a game build. The main model can access the RAG to find build details, which would include information on pant mods for that build."
+        }
+    ]
 }
 
 Now, perform the analysis for the provided query and memories.`;

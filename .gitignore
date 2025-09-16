@@ -42,3 +42,5 @@ Code project.code-workspace
 test_relevance_analyzer.js
 simple_test_relevance.js
 debug_relevance.js
+chroma.sqlite3
+chroma_db/

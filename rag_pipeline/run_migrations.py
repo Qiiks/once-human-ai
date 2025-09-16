@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 SOURCE_DB_PATH = "/app/prebuilt_db" 
 
 # This is the path on the persistent volume where the live DB should reside.
-# It corresponds to the `destination` in your fly.toml `[mounts]` section.
+# It corresponds to the destination mount for your deployment platform (e.g., Coolify or other hosts).
 DESTINATION_DB_PATH = "/data/chroma_db"
 
 # A simple flag file to indicate that the initial setup has been completed.

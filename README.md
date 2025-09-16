@@ -44,9 +44,9 @@ To get the project up and running, you will need to set up both the Node.js bot 
     *   Run the RAG service: `python rag_service.py`
 
 4.  **Docker Deployment**:
-    *   The project includes a `Dockerfile` and `fly.toml`, allowing for easy containerization and deployment on services like Fly.io.
+    *   The project includes a `Dockerfile` for easy containerization. Deploy to your preferred host (e.g., Coolify, Render, or other container hosts).
     *   Build the Docker image: `docker build -t once-human-bot .`
-    *   Run the container: `docker run -p 8080:8080 once-human-bot`
+    *   Run the container locally: `docker run -p 8080:8080 once-human-bot`
 
 ## Project Structure
 
@@ -54,4 +54,4 @@ To get the project up and running, you will need to set up both the Node.js bot 
 *   [`rag_pipeline/`](rag_pipeline/): Holds the Python service for the RAG pipeline, including data processing scripts, the query service, and API endpoints.
 *   [`OncehumanPDFs/`](OncehumanPDFs/): Stores the source PDF documents that are fed into the RAG pipeline to build the knowledge base.
 *   [`Dockerfile`](Dockerfile): Defines the container environment for deploying the application.
-*   [`fly.toml`](fly.toml): Configuration file for deploying the application on Fly.io.
+*   (Optional) Configure your deployment platform of choice. The project previously included `fly.toml` but it has been removed to keep deployment instructions platform-agnostic.
