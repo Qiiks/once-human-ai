@@ -1,0 +1,76 @@
+version: '3.8'
+
+# Production overrides for Coolify deployment
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+services:
+  rag-service:
+    # No exposed ports - Coolify handles reverse proxy
+    ports: []
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=rag-service,app=once-human-bot"
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=rag-service"
+      - "coolify.app=once-human-bot"
+
+  discord-bot:
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=discord-bot,app=once-human-bot"
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=discord-bot"
+      - "coolify.app=once-human-bot"
+
+# Production volume configuration
+volumes:
+  chroma_db:
+    labels:
+      - "coolify.backup=true"
+      - "coolify.backup.frequency=daily"
+  sqlite_db:
+    labels:
+      - "coolify.backup=true"
+      - "coolify.backup.frequency=daily"
+  model_cache:
+    labels:
+      - "coolify.backup=false"  # Model cache can be regenerated
+
+# Production network configuration
+networks:
+  app-network:
+    internal: true  # Internal network only - no external access
+    labels:
+      - "coolify.managed=true"

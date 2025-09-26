@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  rag-service:
+    build:
+      context: .
+      dockerfile: rag_pipeline/Dockerfile
+    container_name: once-human-rag
+    env_file:
+      - .env
+    environment:
+      - CHROMA_DB_PATH=/data/chroma_db
+      - SENTENCE_TRANSFORMERS_HOME=/app/model_cache
+    volumes:
+      - chroma_db:/data/chroma_db
+      - sqlite_db:/data
+      - model_cache:/app/model_cache
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  discord-bot:
+    build:
+      context: .
+      dockerfile: once-human-bot/Dockerfile
+    container_name: once-human-bot
+    env_file:
+      - .env
+    environment:
+      - RAG_SERVICE_URL=http://rag-service:5000
+      - DATABASE_PATH=/data/memory.db
+    volumes:
+      - sqlite_db:/data
+    networks:
+      - app-network
+    depends_on:
+      rag-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  chroma_db:
+    driver: local
+    name: once-human-chroma-db
+  sqlite_db:
+    driver: local
+    name: once-human-sqlite-db
+  model_cache:
+    driver: local
+    name: once-human-model-cache
+
+networks:
+  app-network:
+    driver: bridge
+    name: once-human-network

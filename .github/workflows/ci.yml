@@ -1,0 +1,196 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  # Docker image names - update these to match your registry
+  DISCORD_BOT_IMAGE: once-human-bot
+  RAG_SERVICE_IMAGE: rag-pipeline
+  # Uncomment and set your registry URL when ready to push images
+  # REGISTRY: ghcr.io
+  # REGISTRY_USERNAME: ${{ github.actor }}
+
+jobs:
+  validate-compose:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker-compose -f docker-compose.yml config
+
+      - name: Validate docker-compose.prod.yml
+        run: docker-compose -f docker-compose.prod.yml config
+
+      - name: Check for docker-compose.override.yml
+        run: |
+          if [ -f docker-compose.override.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.override.yml config
+          fi
+
+  build-discord-bot:
+    name: Build Discord Bot
+    runs-on: ubuntu-latest
+    needs: validate-compose
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Discord Bot image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./once-human-bot
+          file: ./once-human-bot/Dockerfile
+          push: false
+          tags: ${{ env.DISCORD_BOT_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Uncomment to enable registry push
+      # - name: Log in to Container Registry
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ${{ env.REGISTRY }}
+      #     username: ${{ env.REGISTRY_USERNAME }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Push Discord Bot image
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: ./once-human-bot
+      #     file: ./once-human-bot/Dockerfile
+      #     push: true
+      #     tags: |
+      #       ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.DISCORD_BOT_IMAGE }}:latest
+      #       ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.DISCORD_BOT_IMAGE }}:${{ github.sha }}
+
+  build-rag-service:
+    name: Build RAG Service
+    runs-on: ubuntu-latest
+    needs: validate-compose
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build RAG Service image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./rag_pipeline
+          file: ./rag_pipeline/Dockerfile
+          push: false
+          tags: ${{ env.RAG_SERVICE_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Uncomment to enable registry push
+      # - name: Log in to Container Registry
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ${{ env.REGISTRY }}
+      #     username: ${{ env.REGISTRY_USERNAME }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Push RAG Service image
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: ./rag_pipeline
+      #     file: ./rag_pipeline/Dockerfile
+      #     push: true
+      #     tags: |
+      #       ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.RAG_SERVICE_IMAGE }}:latest
+      #       ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.RAG_SERVICE_IMAGE }}:${{ github.sha }}
+
+  test-services:
+    name: Test Services
+    runs-on: ubuntu-latest
+    needs: [build-discord-bot, build-rag-service]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create test environment file
+        run: |
+          cp .env.example .env
+          # Add any test-specific environment variables here
+          echo "NODE_ENV=test" >> .env
+
+      - name: Start services with Docker Compose
+        run: |
+          docker-compose up -d
+          # Wait for services to be healthy
+          sleep 10
+
+      - name: Check service health
+        run: |
+          docker-compose ps
+          # Add specific health checks here
+          # Example: curl http://localhost:3000/health
+
+      - name: View logs if failed
+        if: failure()
+        run: docker-compose logs
+
+      - name: Stop services
+        if: always()
+        run: docker-compose down
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [build-discord-bot, build-rag-service]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner on Discord Bot
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './once-human-bot'
+          format: 'sarif'
+          output: 'trivy-discord-bot.sarif'
+
+      - name: Run Trivy vulnerability scanner on RAG Service
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './rag_pipeline'
+          format: 'sarif'
+          output: 'trivy-rag-service.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: '.'
+
+# Coolify Webhook Deployment
+# 
+# To set up automatic deployment with Coolify:
+# 
+# 1. In your Coolify dashboard, navigate to your application
+# 2. Go to the "Webhooks" section
+# 3. Create a new webhook and copy the webhook URL
+# 4. In your GitHub repository:
+#    - Go to Settings > Webhooks
+#    - Add a new webhook with the Coolify URL
+#    - Set content type to "application/json"
+#    - Select "Just the push event" or customize as needed
+#    - Save the webhook
+# 
+# 5. Coolify will automatically deploy when you push to the configured branch
+# 
+# For production deployments, ensure your docker-compose.prod.yml is configured
+# and set as the deployment file in Coolify settings.

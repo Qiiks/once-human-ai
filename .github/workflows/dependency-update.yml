@@ -1,0 +1,236 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  update-npm-dependencies:
+    name: Update NPM Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            once-human-bot/package-lock.json
+
+      - name: Update root dependencies
+        run: |
+          echo "Checking for updates in root package.json..."
+          npm update
+          npm audit fix --force || true
+
+      - name: Update Discord bot dependencies
+        working-directory: ./once-human-bot
+        run: |
+          echo "Checking for updates in Discord bot..."
+          npm update
+          npm audit fix --force || true
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check-changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update npm dependencies'
+          title: 'Automated NPM Dependency Updates'
+          body: |
+            ## Automated Dependency Update
+
+            This PR contains automated updates for NPM dependencies.
+
+            ### What's included:
+            - Updated dependencies in root `package.json`
+            - Updated dependencies in `once-human-bot/package.json`
+            - Security fixes applied via `npm audit fix`
+
+            ### Review checklist:
+            - [ ] Check for breaking changes in updated packages
+            - [ ] Verify Discord bot functionality
+            - [ ] Test Docker builds
+            - [ ] Review security advisories
+
+            ---
+            *This PR was automatically created by the dependency update workflow.*
+          branch: automated/npm-updates
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
+
+  update-python-dependencies:
+    name: Update Python Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-tools
+
+      - name: Update RAG pipeline dependencies
+        working-directory: ./rag_pipeline
+        run: |
+          echo "Checking for updates in RAG pipeline..."
+          # Create a temporary requirements.in from current requirements.txt
+          cp requirements.txt requirements.in
+          
+          # Compile updated requirements
+          pip-compile --upgrade requirements.in -o requirements.txt
+          
+          # Clean up
+          rm requirements.in
+
+      - name: Security check with pip-audit
+        working-directory: ./rag_pipeline
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --fix || true
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check-changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update python dependencies'
+          title: 'Automated Python Dependency Updates'
+          body: |
+            ## Automated Dependency Update
+
+            This PR contains automated updates for Python dependencies.
+
+            ### What's included:
+            - Updated dependencies in `rag_pipeline/requirements.txt`
+            - Security fixes applied via `pip-audit`
+
+            ### Review checklist:
+            - [ ] Check for breaking changes in updated packages
+            - [ ] Verify RAG service functionality
+            - [ ] Test Docker builds
+            - [ ] Review security advisories
+
+            ---
+            *This PR was automatically created by the dependency update workflow.*
+          branch: automated/python-updates
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
+
+  security-advisory-check:
+    name: Security Advisory Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Create security report issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const date = new Date().toISOString().split('T')[0];
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Security Advisory Report - ${date}`,
+              body: `## Security Advisory Report
+
+            A security scan has detected potential vulnerabilities in the project dependencies.
+
+            ### Action Required:
+            1. Review the Trivy scan results in the workflow logs
+            2. Update affected dependencies
+            3. Apply security patches as recommended
+
+            ### Workflow Run:
+            [View Details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+
+            ---
+            *This issue was automatically created by the security advisory workflow.*`,
+              labels: ['security', 'automated']
+            });
+
+# Dependabot Alternative Configuration
+# 
+# If you prefer using GitHub's Dependabot instead of this workflow:
+# 
+# 1. Create a file `.github/dependabot.yml` with:
+# 
+# version: 2
+# updates:
+#   - package-ecosystem: "npm"
+#     directory: "/"
+#     schedule:
+#       interval: "weekly"
+#     open-pull-requests-limit: 5
+#   
+#   - package-ecosystem: "npm"
+#     directory: "/once-human-bot"
+#     schedule:
+#       interval: "weekly"
+#     open-pull-requests-limit: 5
+#   
+#   - package-ecosystem: "pip"
+#     directory: "/rag_pipeline"
+#     schedule:
+#       interval: "weekly"
+#     open-pull-requests-limit: 5
+#   
+#   - package-ecosystem: "docker"
+#     directory: "/once-human-bot"
+#     schedule:
+#       interval: "weekly"
+#   
+#   - package-ecosystem: "docker"
+#     directory: "/rag_pipeline"
+#     schedule:
+#       interval: "weekly"
