@@ -6,7 +6,7 @@ const { PermissionFlagsBits } = require('discord.js');
 const { analyzeRelevance } = require('./relevanceAnalyzer');
 const { addMemory, getMemories } = require('./memoryManager');
 
-const RAG_SERVICE_URL = 'http://localhost:5000';
+const RAG_SERVICE_URL = 'https://assgowscw4gc0sogo8wg0sgc.overwatching.codes';
 
 // Tool definitions for Gemini
 const groundingTool = { googleSearch: {} };
