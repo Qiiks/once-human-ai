@@ -14,9 +14,9 @@ WORKDIR /build
 COPY rag_pipeline/requirements.txt ./
 
 # Create wheels for dependencies
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels \
+RUN pip wheel --no-deps --wheel-dir /build/wheels \
     torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels \
+    pip wheel --no-deps --wheel-dir /build/wheels \
     -r requirements.txt
 
 # Production stage
@@ -34,7 +34,7 @@ WORKDIR /app
 
 # Copy wheels from builder and install
 COPY --from=builder /build/wheels /wheels
-RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
+RUN pip install /wheels/* && rm -rf /wheels
 
 # Set model cache directory
 ENV SENTENCE_TRANSFORMERS_HOME=/app/model_cache
