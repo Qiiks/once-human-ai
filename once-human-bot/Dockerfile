@@ -37,6 +37,10 @@ COPY --from=builder --chown=nodejs:nodejs /build/once-human-bot/node_modules ./o
 COPY --chown=nodejs:nodejs package*.json ./
 COPY --chown=nodejs:nodejs once-human-bot/ ./once-human-bot/
 
+# Create rag_pipeline directory and copy game_entities.json
+RUN mkdir -p /app/rag_pipeline && chown -R nodejs:nodejs /app/rag_pipeline
+COPY --chown=nodejs:nodejs rag_pipeline/game_entities.json ./rag_pipeline/game_entities.json
+
 # Create data directory for SQLite
 RUN mkdir -p /data && chown -R nodejs:nodejs /data
 
