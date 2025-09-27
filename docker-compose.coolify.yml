@@ -1,5 +1,8 @@
 version: '3.8'
 
+# Production-ready docker-compose file for Coolify deployment
+# Merges base configuration with production overrides
+
 services:
   rag-service:
     build:
@@ -9,28 +12,34 @@ services:
     env_file:
       - .env
     environment:
-      # Tier 1: Core Service Configuration
+      # Tier 1: Core Service Configuration (Production)
       - SERVICE_NAME=rag-service
       - SERVICE_VERSION=1.0.0
-      - ENVIRONMENT=development
+      - ENVIRONMENT=production
       
-      # Service Binding
+      # Service Binding (Production)
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5000
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
       
       # Tier 3: Infrastructure Configuration
       - CHROMA_DB_PATH=/data/chroma_db
       - SENTENCE_TRANSFORMERS_HOME=/app/model_cache
       - DATABASE_PATH=/data/memory.db
       
-      # Logging and monitoring
-      - LOG_LEVEL=info
+      # Logging and monitoring (Production)
+      - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
       
-      # Health check configuration
-      - HEALTH_CHECK_INTERVAL=30s
+      # Production service discovery settings
+      - SERVICE_DISCOVERY_TIMEOUT=10000
+      - SERVICE_DISCOVERY_RETRIES=5
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=30000
+      
+      # Production health check configuration
+      - HEALTH_CHECK_INTERVAL=15s
       - METRICS_ENABLED=true
     volumes:
       - chroma_db:/data/chroma_db
@@ -64,11 +73,29 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.5'
-          memory: 2G
+          cpus: '2'
+          memory: 3G
         reservations:
-          cpus: '0.5'
-          memory: 1G
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=rag-service,app=once-human-bot"
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=rag-service"
+      - "coolify.app=once-human-bot"
+      - "coolify.port=5000"
+      - "coolify.protocol=http"
+      - "coolify.healthcheck.enabled=true"
+      - "coolify.healthcheck.path=/health"
+      - "coolify.healthcheck.interval=30s"
+      - "coolify.healthcheck.timeout=10s"
+      - "coolify.healthcheck.retries=3"
+      - "traefik.enable=false"  # Internal service only
 
   discord-bot:
     build:
@@ -78,13 +105,13 @@ services:
     env_file:
       - .env
     environment:
-      # Tier 1: Core Service Configuration
+      # Tier 1: Core Service Configuration (Production)
       - SERVICE_NAME=discord-bot
       - SERVICE_VERSION=1.0.0
-      - ENVIRONMENT=development
-      - NODE_ENV=development
+      - ENVIRONMENT=production
+      - NODE_ENV=production
       
-      # Tier 2: Service Discovery Configuration
+      # Tier 2: Service Discovery Configuration (Production)
       - RAG_SERVICE_URL=http://rag-service:5000
       - RAG_SERVICE_HEALTH_ENDPOINT=/health
       - RAG_SERVICE_TIMEOUT=30000
@@ -93,27 +120,27 @@ services:
       - RAG_SERVICE_FALLBACK_URLS=http://localhost:5000,http://127.0.0.1:5000
       - RAG_SERVICE_DISCOVERY_STRATEGY=dns-first
       
-      # Circuit breaker configuration
-      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
-      - CIRCUIT_BREAKER_TIMEOUT=60000
-      - CIRCUIT_BREAKER_RESET_TIMEOUT=300000
+      # Production circuit breaker configuration
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=30000
+      - CIRCUIT_BREAKER_RESET_TIMEOUT=180000
       
-      # Service discovery timeouts and retries
-      - SERVICE_DISCOVERY_TIMEOUT=30000
-      - SERVICE_DISCOVERY_RETRIES=3
+      # Production service discovery timeouts and retries
+      - SERVICE_DISCOVERY_TIMEOUT=10000
+      - SERVICE_DISCOVERY_RETRIES=5
       - SERVICE_DISCOVERY_BACKOFF=exponential
       
       # Tier 3: Infrastructure Configuration
       - DATABASE_PATH=/data/memory.db
       
-      # Network configuration
+      # Production network configuration
       - DOCKER_NETWORK_NAME=once-human-network
-      - INTERNAL_NETWORK_ONLY=false
+      - INTERNAL_NETWORK_ONLY=true
       - ENABLE_EXTERNAL_ACCESS=false
       
-      # Logging and monitoring
+      # Logging and monitoring (Production)
       - LOG_LEVEL=info
-      - HEALTH_CHECK_INTERVAL=30s
+      - HEALTH_CHECK_INTERVAL=15s
       - METRICS_ENABLED=true
       
       # Health check port (for internal health endpoint)
@@ -168,28 +195,50 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.75'
-          memory: 768M
+          cpus: '1'
+          memory: 1G
         reservations:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=discord-bot,app=once-human-bot"
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=discord-bot"
+      - "coolify.app=once-human-bot"
+      - "coolify.healthcheck.enabled=true"
+      - "coolify.healthcheck.path=/health"
+      - "coolify.healthcheck.interval=30s"
+      - "traefik.enable=false"  # No external access needed
 
 volumes:
   chroma_db:
     driver: local
     name: once-human-chroma-db
+    labels:
+      - "coolify.backup=true"
+      - "coolify.backup.frequency=daily"
   sqlite_db:
     driver: local
     name: once-human-sqlite-db
+    labels:
+      - "coolify.backup=true"
+      - "coolify.backup.frequency=daily"
   model_cache:
     driver: local
     name: once-human-model-cache
+    labels:
+      - "coolify.backup=false"  # Model cache can be regenerated
 
 networks:
   app-network:
     driver: bridge
     name: once-human-network
-    internal: false  # Allow external access for development
+    internal: false  # Allow Coolify reverse proxy access
     labels:
       - "coolify.managed=true"
       - "coolify.network=internal"

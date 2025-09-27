@@ -10,6 +10,9 @@ import logging
 import traceback
 import uuid
 import io
+import time
+from datetime import datetime
+from collections import defaultdict
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -55,12 +58,209 @@ collection = client.get_or_create_collection(
 )
 logger.info("Collection ready. Service is now up and running.")
 
+# Initialize metrics tracking
+start_time = time.time()
+request_counter = defaultdict(int)
+
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy", "version": "1.0.0"})
+    """
+    Comprehensive health check endpoint that validates:
+    - Flask server status
+    - ChromaDB connection and collection availability
+    - Embedding model availability
+    - Database path accessibility
+    - Memory usage
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "service": "rag-service",
+        "version": "1.0.0",
+        "checks": {}
+    }
+    
+    overall_healthy = True
+    
+    try:
+        # Check 1: Flask server status
+        health_status["checks"]["flask_server"] = {
+            "status": "healthy",
+            "message": "Flask server is running"
+        }
+        
+        # Check 2: ChromaDB client connection
+        try:
+            # Test client connection by getting heartbeat
+            client.heartbeat()
+            health_status["checks"]["chromadb_client"] = {
+                "status": "healthy",
+                "message": "ChromaDB client is connected"
+            }
+        except Exception as e:
+            health_status["checks"]["chromadb_client"] = {
+                "status": "unhealthy",
+                "message": f"ChromaDB client connection failed: {str(e)}"
+            }
+            overall_healthy = False
+        
+        # Check 3: Collection availability and basic query test
+        try:
+            # Test collection access and basic functionality
+            collection_count = collection.count()
+            # Perform a simple test query to ensure embedding function works
+            test_results = collection.query(
+                query_texts=["test"],
+                n_results=1
+            )
+            health_status["checks"]["chromadb_collection"] = {
+                "status": "healthy",
+                "message": f"Collection accessible with {collection_count} documents",
+                "document_count": collection_count
+            }
+        except Exception as e:
+            health_status["checks"]["chromadb_collection"] = {
+                "status": "unhealthy",
+                "message": f"Collection access failed: {str(e)}"
+            }
+            overall_healthy = False
+        
+        # Check 4: Embedding model availability
+        try:
+            # Test embedding function by creating a simple embedding
+            test_embedding = embedding_function(["health check test"])
+            if test_embedding and len(test_embedding) > 0:
+                health_status["checks"]["embedding_model"] = {
+                    "status": "healthy",
+                    "message": "Sentence transformer model is loaded and functional",
+                    "model_name": "all-MiniLM-L6-v2"
+                }
+            else:
+                health_status["checks"]["embedding_model"] = {
+                    "status": "unhealthy",
+                    "message": "Embedding model returned empty result"
+                }
+                overall_healthy = False
+        except Exception as e:
+            health_status["checks"]["embedding_model"] = {
+                "status": "unhealthy",
+                "message": f"Embedding model test failed: {str(e)}"
+            }
+            overall_healthy = False
+        
+        # Check 5: Database path accessibility
+        try:
+            db_path = os.getenv("CHROMA_DB_PATH", "/data/chroma_db")
+            if os.path.exists(db_path) and os.access(db_path, os.R_OK | os.W_OK):
+                # Get directory size
+                total_size = 0
+                for dirpath, dirnames, filenames in os.walk(db_path):
+                    for filename in filenames:
+                        filepath = os.path.join(dirpath, filename)
+                        total_size += os.path.getsize(filepath)
+                
+                health_status["checks"]["database_storage"] = {
+                    "status": "healthy",
+                    "message": f"Database path accessible at {db_path}",
+                    "path": db_path,
+                    "size_mb": round(total_size / (1024 * 1024), 2)
+                }
+            else:
+                health_status["checks"]["database_storage"] = {
+                    "status": "unhealthy",
+                    "message": f"Database path not accessible: {db_path}"
+                }
+                overall_healthy = False
+        except Exception as e:
+            health_status["checks"]["database_storage"] = {
+                "status": "unhealthy",
+                "message": f"Database storage check failed: {str(e)}"
+            }
+            overall_healthy = False
+        
+        # Check 6: Memory usage
+        try:
+            import psutil
+            memory_info = psutil.virtual_memory()
+            memory_percent = memory_info.percent
+            
+            if memory_percent < 90:
+                health_status["checks"]["memory_usage"] = {
+                    "status": "healthy",
+                    "message": f"Memory usage is acceptable: {memory_percent}%",
+                    "memory_percent": memory_percent,
+                    "available_gb": round(memory_info.available / (1024**3), 2)
+                }
+            else:
+                health_status["checks"]["memory_usage"] = {
+                    "status": "warning",
+                    "message": f"High memory usage: {memory_percent}%",
+                    "memory_percent": memory_percent,
+                    "available_gb": round(memory_info.available / (1024**3), 2)
+                }
+        except ImportError:
+            health_status["checks"]["memory_usage"] = {
+                "status": "skipped",
+                "message": "psutil not available for memory monitoring"
+            }
+        except Exception as e:
+            health_status["checks"]["memory_usage"] = {
+                "status": "error",
+                "message": f"Memory check failed: {str(e)}"
+            }
+        
+        # Check 7: Environment configuration
+        required_env_vars = ["CHROMA_DB_PATH"]
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+        
+        if not missing_vars:
+            health_status["checks"]["environment"] = {
+                "status": "healthy",
+                "message": "All required environment variables are set"
+            }
+        else:
+            health_status["checks"]["environment"] = {
+                "status": "warning",
+                "message": f"Missing environment variables: {', '.join(missing_vars)}"
+            }
+        
+        # Set overall status
+        if overall_healthy:
+            health_status["status"] = "healthy"
+        else:
+            health_status["status"] = "unhealthy"
+        
+        # Add performance metrics
+        health_status["metrics"] = {
+            "uptime_seconds": time.time() - start_time,
+            "total_requests": request_counter.get("total", 0),
+            "successful_queries": request_counter.get("successful_queries", 0),
+            "failed_queries": request_counter.get("failed_queries", 0)
+        }
+        
+        status_code = 200 if overall_healthy else 503
+        return jsonify(health_status), status_code
+        
+    except Exception as e:
+        logger.error(f"Health check failed with exception: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "status": "unhealthy",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "service": "rag-service",
+            "version": "1.0.0",
+            "error": str(e),
+            "checks": {
+                "critical_error": {
+                    "status": "unhealthy",
+                    "message": f"Health check endpoint failed: {str(e)}"
+                }
+            }
+        }), 503
 
 @app.route('/query', methods=['POST'])
 def query_database():
+    request_counter["total"] += 1
     try:
         logger.info("Received query request")
         data = request.json
@@ -97,8 +297,8 @@ def query_database():
             metadata = results['metadatas'][0][i]
             
             # Convert semicolon-separated strings back to lists for relevant fields
-            list_fields = ['effects', 'keywords', 'stats_percentages', 'stats_numbers', 
-                          'stats_durations', 'entities_weapons', 'entities_armor_sets', 
+            list_fields = ['effects', 'keywords', 'stats_percentages', 'stats_numbers',
+                          'stats_durations', 'entities_weapons', 'entities_armor_sets',
                           'entities_key_gear', 'entities_weapon_mods', 'entities_armor_mods']
             
             processed_metadata = {}
@@ -115,11 +315,14 @@ def query_database():
                 'distance': float(results['distances'][0][i])
             })
 
+        request_counter["successful_queries"] += 1
         return jsonify({
             'success': True,
             'results': formatted_results
         })
     except Exception as e:
+        request_counter["failed_queries"] += 1
+        logger.error(f"Query failed: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -170,6 +373,88 @@ def add_to_database():
             'success': False,
             'error': str(e)
         }), 500
+
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """
+    Prometheus-style metrics endpoint for monitoring
+    """
+    try:
+        # Get collection count
+        doc_count = collection.count()
+        
+        # Calculate uptime
+        uptime = time.time() - start_time
+        
+        # Memory usage if available
+        memory_info = {}
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            memory_info = {
+                "memory_usage_percent": mem.percent,
+                "memory_available_bytes": mem.available,
+                "memory_total_bytes": mem.total
+            }
+        except ImportError:
+            pass
+        
+        metrics_data = {
+            "service_info": {
+                "name": "rag-service",
+                "version": "1.0.0",
+                "uptime_seconds": uptime
+            },
+            "request_metrics": dict(request_counter),
+            "database_metrics": {
+                "document_count": doc_count,
+                "collection_name": "once_human_knowledge"
+            },
+            "system_metrics": memory_info,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        
+        return jsonify(metrics_data)
+    except Exception as e:
+        logger.error(f"Metrics endpoint failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/readiness', methods=['GET'])
+def readiness_check():
+    """
+    Kubernetes-style readiness probe - checks if service is ready to accept traffic
+    """
+    try:
+        # Quick checks for readiness
+        collection.heartbeat()  # Check ChromaDB connection
+        doc_count = collection.count()  # Verify collection is accessible
+        
+        return jsonify({
+            "status": "ready",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "service": "rag-service",
+            "document_count": doc_count
+        })
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        return jsonify({
+            "status": "not_ready",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "service": "rag-service",
+            "error": str(e)
+        }), 503
+
+@app.route('/liveness', methods=['GET'])
+def liveness_check():
+    """
+    Kubernetes-style liveness probe - basic check if service is alive
+    """
+    return jsonify({
+        "status": "alive",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "service": "rag-service",
+        "uptime_seconds": time.time() - start_time
+    })
 
 @app.route('/')
 def index():

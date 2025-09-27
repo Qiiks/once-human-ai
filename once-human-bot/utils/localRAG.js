@@ -6,7 +6,13 @@ const { PermissionFlagsBits } = require('discord.js');
 const { analyzeRelevance } = require('./relevanceAnalyzer');
 const { addMemory, getMemories } = require('./memoryManager');
 
-const RAG_SERVICE_URL = 'http://localhost:5000';
+// Service discovery configuration with fallback chain
+const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag-service:5000';
+const RAG_SERVICE_FALLBACK_URLS = process.env.RAG_SERVICE_FALLBACK_URLS
+    ? process.env.RAG_SERVICE_FALLBACK_URLS.split(',')
+    : ['http://localhost:5000', 'http://127.0.0.1:5000'];
+const SERVICE_DISCOVERY_TIMEOUT = parseInt(process.env.SERVICE_DISCOVERY_TIMEOUT) || 30000;
+const SERVICE_DISCOVERY_RETRIES = parseInt(process.env.SERVICE_DISCOVERY_RETRIES) || 3;
 
 // Tool definitions for Gemini
 const groundingTool = { googleSearch: {} };
@@ -588,28 +594,19 @@ User Question: ${originalQuery}`;
 
     async add_data(document, metadata) {
         try {
-            // Check if service is healthy
-            const isHealthy = await this.checkHealth();
-            if (!isHealthy) {
-                throw new Error('RAG service is not available. Please ensure the Python service is running.');
-            }
             console.log('Sending data to RAG service:', { document, metadata });
-            const response = await axios.post(`${RAG_SERVICE_URL}/add`, {
+            const response = await this.makeServiceRequest('/add', {
                 document,
                 metadata
             });
-            if (response.data.success) {
+            if (response.success) {
                 console.log('Successfully added data to RAG service');
-                return response.data;
+                return response;
             } else {
-                console.error('RAG service error:', response.data.error);
-                throw new Error(response.data.error || 'Unknown error occurred while adding data');
+                console.error('RAG service error:', response.error);
+                throw new Error(response.error || 'Unknown error occurred while adding data');
             }
         } catch (error) {
-            if (error.code === 'ECONNREFUSED') {
-                console.error('Could not connect to RAG service. Is it running?');
-                throw new Error('RAG service is not running. Please start the Python service.');
-            }
             console.error('Error sending data to RAG service:', error.message);
             throw error;
         }
@@ -617,22 +614,18 @@ User Question: ${originalQuery}`;
 
     async update_data(id, document, metadata) {
         try {
-            const isHealthy = await this.checkHealth();
-            if (!isHealthy) {
-                throw new Error('RAG service is not available.');
-            }
             console.log('Sending update to RAG service:', { id, document, metadata });
-            const response = await axios.post(`${RAG_SERVICE_URL}/update`, {
+            const response = await this.makeServiceRequest('/update', {
                 id,
                 document,
                 metadata
             });
-            if (response.data.success) {
+            if (response.success) {
                 console.log('Successfully updated data in RAG service');
-                return response.data;
+                return response;
             } else {
-                console.error('RAG service error on update:', response.data.error);
-                throw new Error(response.data.error || 'Unknown error occurred while updating data');
+                console.error('RAG service error on update:', response.error);
+                throw new Error(response.error || 'Unknown error occurred while updating data');
             }
         } catch (error) {
             console.error('Error sending update to RAG service:', error.message);
@@ -642,8 +635,8 @@ User Question: ${originalQuery}`;
 
     async checkHealth() {
         try {
-            const response = await axios.get(`${RAG_SERVICE_URL}/health`);
-            return response.data.status === "healthy";
+            const response = await this.makeServiceRequest('/health', null, 'GET');
+            return response && response.status === 'healthy';
         } catch (error) {
             console.error('RAG service health check failed:', error.message);
             return false;
@@ -652,33 +645,64 @@ User Question: ${originalQuery}`;
 
     async queryDatabase(query, nResults = 5) {
         try {
-            // Check if service is healthy
-            const isHealthy = await this.checkHealth();
-            if (!isHealthy) {
-                throw new Error('RAG service is not available. Please ensure the Python service is running.');
-            }
-
             console.log('Querying RAG service with:', { query, nResults });
-            const response = await axios.post(`${RAG_SERVICE_URL}/query`, {
+            const response = await this.makeServiceRequest('/query', {
                 query,
                 n_results: nResults
             });
 
-            if (response.data.success) {
-                console.log(`Retrieved ${response.data.results.length} results from RAG service`);
-                return response.data.results;
+            if (response.success) {
+                console.log(`Retrieved ${response.results.length} results from RAG service`);
+                return response.results;
             } else {
-                console.error('RAG service error:', response.data.error);
-                throw new Error(response.data.error || 'Unknown error occurred');
+                console.error('RAG service error:', response.error);
+                throw new Error(response.error || 'Unknown error occurred');
             }
         } catch (error) {
-            if (error.code === 'ECONNREFUSED') {
-                console.error('Could not connect to RAG service. Is it running?');
-                throw new Error('RAG service is not running. Please start the Python service.');
-            }
             console.error('Error querying RAG service:', error.message);
             throw error;
         }
+    }
+
+    // Service discovery and resilience methods
+    async makeServiceRequest(endpoint, data = null, method = 'POST', retryCount = 0) {
+        const urls = [RAG_SERVICE_URL, ...RAG_SERVICE_FALLBACK_URLS];
+        
+        for (const url of urls) {
+            try {
+                console.log(`Attempting ${method} request to ${url}${endpoint}`);
+                
+                const config = {
+                    method: method,
+                    url: `${url}${endpoint}`,
+                    timeout: SERVICE_DISCOVERY_TIMEOUT,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+                
+                if (data && method !== 'GET') {
+                    config.data = data;
+                }
+                
+                const response = await axios(config);
+                console.log(`Successfully connected to RAG service at ${url}`);
+                return response.data;
+                
+            } catch (error) {
+                console.warn(`Failed to connect to RAG service at ${url}:`, error.message);
+                
+                // If this is the last URL and we haven't exceeded retry count, retry with exponential backoff
+                if (url === urls[urls.length - 1] && retryCount < SERVICE_DISCOVERY_RETRIES) {
+                    const backoffDelay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+                    console.log(`Retrying in ${backoffDelay}ms (attempt ${retryCount + 1}/${SERVICE_DISCOVERY_RETRIES})`);
+                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                    return this.makeServiceRequest(endpoint, data, method, retryCount + 1);
+                }
+            }
+        }
+        
+        throw new Error(`All RAG service endpoints failed after ${SERVICE_DISCOVERY_RETRIES} retries. URLs tried: ${urls.join(', ')}`);
     }
 
     async generateKeywords(promptText, model) {

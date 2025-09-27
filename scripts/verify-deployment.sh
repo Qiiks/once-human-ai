@@ -113,9 +113,182 @@ verify_container_health() {
     done
 }
 
-# Function to test API endpoints
+# Function to test comprehensive health endpoints
+test_health_endpoints() {
+    print_status "header" "Comprehensive Health Endpoint Tests"
+    
+    local rag_base_url="${PRODUCTION_RAG_URL:-http://rag-service:5000}"
+    local bot_base_url="${PRODUCTION_BOT_URL:-http://discord-bot:3000}"
+    
+    # Test RAG service health endpoints
+    print_status "info" "Testing RAG service health endpoints..."
+    
+    # Main health endpoint
+    local rag_health_response=$(curl -s -w "%{http_code}" -o /tmp/rag_health.json "$rag_base_url/health" 2>/dev/null || echo "000")
+    if [ "$rag_health_response" = "200" ]; then
+        if command -v jq >/dev/null 2>&1 && [ -f /tmp/rag_health.json ]; then
+            local rag_status=$(jq -r '.status // "unknown"' /tmp/rag_health.json 2>/dev/null)
+            local chromadb_status=$(jq -r '.checks.chromadb_client.status // "unknown"' /tmp/rag_health.json 2>/dev/null)
+            local embedding_status=$(jq -r '.checks.embedding_model.status // "unknown"' /tmp/rag_health.json 2>/dev/null)
+            
+            if [ "$rag_status" = "healthy" ]; then
+                print_status "success" "RAG service health endpoint: $rag_status"
+                print_status "info" "  ChromaDB: $chromadb_status"
+                print_status "info" "  Embedding Model: $embedding_status"
+            else
+                print_status "error" "RAG service health endpoint: $rag_status"
+            fi
+        else
+            print_status "success" "RAG service health endpoint responding"
+        fi
+    else
+        print_status "error" "RAG service health check failed (Status: $rag_health_response)"
+    fi
+    
+    # Readiness endpoint
+    local rag_ready_response=$(curl -s -o /dev/null -w "%{http_code}" "$rag_base_url/readiness" 2>/dev/null || echo "000")
+    if [ "$rag_ready_response" = "200" ]; then
+        print_status "success" "RAG service readiness endpoint responding"
+    else
+        print_status "error" "RAG service readiness check failed (Status: $rag_ready_response)"
+    fi
+    
+    # Metrics endpoint
+    local rag_metrics_response=$(curl -s -o /dev/null -w "%{http_code}" "$rag_base_url/metrics" 2>/dev/null || echo "000")
+    if [ "$rag_metrics_response" = "200" ]; then
+        print_status "success" "RAG service metrics endpoint responding"
+    else
+        print_status "warning" "RAG service metrics endpoint not available (Status: $rag_metrics_response)"
+    fi
+    
+    # Test Discord bot health endpoints
+    print_status "info" "Testing Discord bot health endpoints..."
+    
+    # Bot health endpoint
+    local bot_health_response=$(curl -s -w "%{http_code}" -o /tmp/bot_health.json "$bot_base_url/health" 2>/dev/null || echo "000")
+    if [ "$bot_health_response" = "200" ]; then
+        if command -v jq >/dev/null 2>&1 && [ -f /tmp/bot_health.json ]; then
+            local bot_status=$(jq -r '.status // "unknown"' /tmp/bot_health.json 2>/dev/null)
+            local discord_status=$(jq -r '.checks.discord.status // "unknown"' /tmp/bot_health.json 2>/dev/null)
+            local rag_connectivity=$(jq -r '.checks.rag_service.status // "unknown"' /tmp/bot_health.json 2>/dev/null)
+            
+            if [ "$bot_status" = "healthy" ]; then
+                print_status "success" "Discord bot health endpoint: $bot_status"
+                print_status "info" "  Discord Connection: $discord_status"
+                print_status "info" "  RAG Service Connectivity: $rag_connectivity"
+            else
+                print_status "error" "Discord bot health endpoint: $bot_status"
+            fi
+        else
+            print_status "success" "Discord bot health endpoint responding"
+        fi
+    else
+        print_status "error" "Discord bot health check failed (Status: $bot_health_response)"
+    fi
+    
+    # Bot metrics endpoint
+    local bot_metrics_response=$(curl -s -o /dev/null -w "%{http_code}" "$bot_base_url/metrics" 2>/dev/null || echo "000")
+    if [ "$bot_metrics_response" = "200" ]; then
+        print_status "success" "Discord bot metrics endpoint responding"
+    else
+        print_status "warning" "Discord bot metrics endpoint not available (Status: $bot_metrics_response)"
+    fi
+    
+    # Clean up temp files
+    rm -f /tmp/rag_health.json /tmp/bot_health.json
+}
+
+# Function to test service dependencies
+test_service_dependencies() {
+    print_status "header" "Service Dependency Tests"
+    
+    local rag_base_url="${PRODUCTION_RAG_URL:-http://rag-service:5000}"
+    local bot_base_url="${PRODUCTION_BOT_URL:-http://discord-bot:3000}"
+    
+    # Test RAG service dependencies
+    print_status "info" "Testing RAG service dependencies..."
+    
+    local temp_file=$(mktemp)
+    if curl -s --connect-timeout 10 --max-time 15 -o "$temp_file" "$rag_base_url/health" 2>/dev/null; then
+        if command -v jq >/dev/null 2>&1; then
+            local chromadb_status=$(jq -r '.checks.chromadb_client.status // "unknown"' "$temp_file" 2>/dev/null)
+            local collection_status=$(jq -r '.checks.chromadb_collection.status // "unknown"' "$temp_file" 2>/dev/null)
+            local embedding_status=$(jq -r '.checks.embedding_model.status // "unknown"' "$temp_file" 2>/dev/null)
+            local storage_status=$(jq -r '.checks.database_storage.status // "unknown"' "$temp_file" 2>/dev/null)
+            
+            if [ "$chromadb_status" = "healthy" ]; then
+                print_status "success" "RAG → ChromaDB: healthy"
+            else
+                print_status "error" "RAG → ChromaDB: $chromadb_status"
+            fi
+            
+            if [ "$collection_status" = "healthy" ]; then
+                print_status "success" "RAG → Collection: healthy"
+            else
+                print_status "error" "RAG → Collection: $collection_status"
+            fi
+            
+            if [ "$embedding_status" = "healthy" ]; then
+                print_status "success" "RAG → Embedding Model: healthy"
+            else
+                print_status "error" "RAG → Embedding Model: $embedding_status"
+            fi
+            
+            if [ "$storage_status" = "healthy" ]; then
+                print_status "success" "RAG → Storage: healthy"
+            else
+                print_status "warning" "RAG → Storage: $storage_status"
+            fi
+        fi
+    else
+        print_status "error" "Could not retrieve RAG service dependency status"
+    fi
+    rm -f "$temp_file"
+    
+    # Test Discord bot dependencies
+    print_status "info" "Testing Discord bot dependencies..."
+    
+    local temp_file=$(mktemp)
+    if curl -s --connect-timeout 10 --max-time 15 -o "$temp_file" "$bot_base_url/health" 2>/dev/null; then
+        if command -v jq >/dev/null 2>&1; then
+            local discord_status=$(jq -r '.checks.discord.status // "unknown"' "$temp_file" 2>/dev/null)
+            local rag_connectivity=$(jq -r '.checks.rag_service.status // "unknown"' "$temp_file" 2>/dev/null)
+            local env_status=$(jq -r '.checks.environment.status // "unknown"' "$temp_file" 2>/dev/null)
+            local rag_system_status=$(jq -r '.checks.rag_system.status // "unknown"' "$temp_file" 2>/dev/null)
+            
+            if [ "$discord_status" = "healthy" ]; then
+                print_status "success" "Bot → Discord API: healthy"
+            else
+                print_status "error" "Bot → Discord API: $discord_status"
+            fi
+            
+            if [ "$rag_connectivity" = "healthy" ]; then
+                print_status "success" "Bot → RAG Service: healthy"
+            else
+                print_status "error" "Bot → RAG Service: $rag_connectivity"
+            fi
+            
+            if [ "$env_status" = "healthy" ]; then
+                print_status "success" "Bot → Environment: healthy"
+            else
+                print_status "error" "Bot → Environment: $env_status"
+            fi
+            
+            if [ "$rag_system_status" = "healthy" ]; then
+                print_status "success" "Bot → RAG System: healthy"
+            else
+                print_status "error" "Bot → RAG System: $rag_system_status"
+            fi
+        fi
+    else
+        print_status "error" "Could not retrieve Discord bot dependency status"
+    fi
+    rm -f "$temp_file"
+}
+
+# Function to test API endpoints (legacy function, kept for compatibility)
 test_api_endpoints() {
-    print_status "header" "API Endpoint Tests"
+    print_status "header" "Legacy API Endpoint Tests"
     
     # RAG Pipeline health check
     if [ -n "$PRODUCTION_URL" ]; then
@@ -128,7 +301,7 @@ test_api_endpoints() {
             print_status "error" "RAG Pipeline API check failed (Status: $response)"
         fi
     else
-        print_status "warning" "Production URL not configured, skipping API tests"
+        print_status "warning" "Production URL not configured, skipping legacy API tests"
     fi
 }
 
@@ -297,6 +470,12 @@ main() {
     check_environment
     check_coolify_services
     verify_container_health
+    
+    # New comprehensive health checks
+    test_health_endpoints
+    test_service_dependencies
+    
+    # Legacy checks
     test_api_endpoints
     verify_discord_bot
     test_database

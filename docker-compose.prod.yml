@@ -8,10 +8,22 @@ services:
     # No exposed ports - Coolify handles reverse proxy
     ports: []
     environment:
+      # Override development settings for production
+      - ENVIRONMENT=production
       - FLASK_ENV=production
       - FLASK_DEBUG=0
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
+      
+      # Production service discovery settings
+      - SERVICE_DISCOVERY_TIMEOUT=10000
+      - SERVICE_DISCOVERY_RETRIES=5
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=30000
+      
+      # Production health check settings
+      - HEALTH_CHECK_INTERVAL=15s
+      - METRICS_ENABLED=true
     deploy:
       resources:
         limits:
@@ -30,11 +42,36 @@ services:
       - "coolify.managed=true"
       - "coolify.service=rag-service"
       - "coolify.app=once-human-bot"
+      - "coolify.port=5000"
+      - "coolify.protocol=http"
+      - "coolify.healthcheck.enabled=true"
+      - "coolify.healthcheck.path=/health"
+      - "coolify.healthcheck.interval=30s"
+      - "coolify.healthcheck.timeout=10s"
+      - "coolify.healthcheck.retries=3"
+      - "traefik.enable=false"  # Internal service only
 
   discord-bot:
     environment:
+      # Override development settings for production
+      - ENVIRONMENT=production
       - NODE_ENV=production
       - LOG_LEVEL=info
+      
+      # Production service discovery settings
+      - SERVICE_DISCOVERY_TIMEOUT=10000
+      - SERVICE_DISCOVERY_RETRIES=5
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
+      - CIRCUIT_BREAKER_TIMEOUT=30000
+      - CIRCUIT_BREAKER_RESET_TIMEOUT=180000
+      
+      # Production network settings
+      - INTERNAL_NETWORK_ONLY=true
+      - ENABLE_EXTERNAL_ACCESS=false
+      
+      # Production health check settings
+      - HEALTH_CHECK_INTERVAL=15s
+      - METRICS_ENABLED=true
     deploy:
       resources:
         limits:
@@ -53,6 +90,10 @@ services:
       - "coolify.managed=true"
       - "coolify.service=discord-bot"
       - "coolify.app=once-human-bot"
+      - "coolify.healthcheck.enabled=true"
+      - "coolify.healthcheck.path=/health"
+      - "coolify.healthcheck.interval=30s"
+      - "traefik.enable=false"  # No external access needed
 
 # Production volume configuration
 volumes:
@@ -71,6 +112,12 @@ volumes:
 # Production network configuration
 networks:
   app-network:
-    internal: true  # Internal network only - no external access
+    internal: false  # Allow Coolify reverse proxy access
     labels:
       - "coolify.managed=true"
+      - "coolify.network=internal"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1

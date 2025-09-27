@@ -20,17 +20,22 @@ MAX_RETRIES="${MAX_RETRIES:-3}"
 # Service endpoints configuration
 declare -A SERVICE_ENDPOINTS
 declare -A SERVICE_PORTS
+declare -A SERVICE_METRICS
 
 # Local environment endpoints
 if [ "$ENVIRONMENT" = "local" ]; then
-    SERVICE_ENDPOINTS["rag-pipeline"]="http://localhost:8000/health"
-    SERVICE_ENDPOINTS["rag-docs"]="http://localhost:8000/docs"
-    SERVICE_PORTS["discord-bot"]="3000"  # If bot exposes a health port
-    SERVICE_PORTS["database"]="5432"     # Adjust based on your DB
+    SERVICE_ENDPOINTS["rag-service"]="http://localhost:5000/health"
+    SERVICE_ENDPOINTS["discord-bot"]="http://localhost:3000/health"
+    SERVICE_METRICS["rag-service"]="http://localhost:5000/metrics"
+    SERVICE_METRICS["discord-bot"]="http://localhost:3000/metrics"
+    SERVICE_PORTS["rag-service-readiness"]="5000"
+    SERVICE_PORTS["discord-bot-health"]="3000"
 else
     # Production endpoints - update these based on your Coolify deployment
-    SERVICE_ENDPOINTS["rag-pipeline"]="${PRODUCTION_RAG_URL}/health"
-    SERVICE_ENDPOINTS["rag-docs"]="${PRODUCTION_RAG_URL}/docs"
+    SERVICE_ENDPOINTS["rag-service"]="${PRODUCTION_RAG_URL:-http://rag-service:5000}/health"
+    SERVICE_ENDPOINTS["discord-bot"]="${PRODUCTION_BOT_URL:-http://discord-bot:3000}/health"
+    SERVICE_METRICS["rag-service"]="${PRODUCTION_RAG_URL:-http://rag-service:5000}/metrics"
+    SERVICE_METRICS["discord-bot"]="${PRODUCTION_BOT_URL:-http://discord-bot:3000}/metrics"
 fi
 
 # Health check results
@@ -59,7 +64,7 @@ print_status() {
     esac
 }
 
-# Function to check HTTP endpoint health
+# Function to check HTTP endpoint health with detailed analysis
 check_http_endpoint() {
     local name=$1
     local url=$2
@@ -70,15 +75,35 @@ check_http_endpoint() {
     
     while [ $retry_count -lt $MAX_RETRIES ]; do
         local start_time=$(date +%s.%N)
-        local response=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$url" 2>/dev/null || echo "000")
+        local temp_file=$(mktemp)
+        local response=$(curl -s -w "%{http_code}" --connect-timeout 10 --max-time 15 -o "$temp_file" "$url" 2>/dev/null || echo "000")
         local end_time=$(date +%s.%N)
-        local response_time=$(echo "$end_time - $start_time" | bc)
+        local response_time=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "0")
         
         if [ "$response" = "$expected_status" ]; then
-            HEALTH_STATUS["$name"]="healthy"
-            RESPONSE_TIMES["$name"]=$response_time
-            print_status "success" "$name is healthy (${response_time}s)"
-            ((HEALTHY_CHECKS++))
+            # Try to parse health response for detailed status
+            if command -v jq >/dev/null 2>&1 && [ -s "$temp_file" ]; then
+                local health_status=$(jq -r '.status // "unknown"' "$temp_file" 2>/dev/null || echo "unknown")
+                local service_name=$(jq -r '.service // "unknown"' "$temp_file" 2>/dev/null || echo "unknown")
+                local checks_summary=$(jq -r '.checks | to_entries | map(select(.value.status == "unhealthy" or .value.status == "error")) | length' "$temp_file" 2>/dev/null || echo "0")
+                
+                if [ "$health_status" = "healthy" ]; then
+                    HEALTH_STATUS["$name"]="healthy"
+                    RESPONSE_TIMES["$name"]=$response_time
+                    print_status "success" "$name ($service_name) is healthy (${response_time}s)"
+                    ((HEALTHY_CHECKS++))
+                else
+                    HEALTH_STATUS["$name"]="degraded"
+                    RESPONSE_TIMES["$name"]=$response_time
+                    print_status "warning" "$name ($service_name) reports status: $health_status ($checks_summary issues)"
+                fi
+            else
+                HEALTH_STATUS["$name"]="healthy"
+                RESPONSE_TIMES["$name"]=$response_time
+                print_status "success" "$name is responding (${response_time}s)"
+                ((HEALTHY_CHECKS++))
+            fi
+            rm -f "$temp_file"
             ((TOTAL_CHECKS++))
             return 0
         fi
@@ -88,6 +113,7 @@ check_http_endpoint() {
             print_status "warning" "$name check failed (attempt $retry_count/$MAX_RETRIES), retrying..."
             sleep $CHECK_INTERVAL
         fi
+        rm -f "$temp_file"
     done
     
     HEALTH_STATUS["$name"]="unhealthy"
@@ -95,6 +121,29 @@ check_http_endpoint() {
     print_status "error" "$name is unhealthy (Status: $response)"
     ((TOTAL_CHECKS++))
     return 1
+}
+
+# Function to check metrics endpoint
+check_metrics_endpoint() {
+    local name=$1
+    local url=$2
+    
+    print_status "info" "Checking $name metrics..."
+    
+    local temp_file=$(mktemp)
+    local response=$(curl -s -w "%{http_code}" --connect-timeout 5 --max-time 10 -o "$temp_file" "$url" 2>/dev/null || echo "000")
+    
+    if [ "$response" = "200" ] && command -v jq >/dev/null 2>&1 && [ -s "$temp_file" ]; then
+        local uptime=$(jq -r '.uptime_seconds // .service_info.uptime_seconds // "unknown"' "$temp_file" 2>/dev/null)
+        local memory_usage=$(jq -r '.system_metrics.memory_usage_percent // .memory_usage.heapUsed // "unknown"' "$temp_file" 2>/dev/null)
+        local requests=$(jq -r '.request_metrics.total // "unknown"' "$temp_file" 2>/dev/null)
+        
+        print_status "info" "  Uptime: ${uptime}s, Memory: ${memory_usage}MB, Requests: $requests"
+    else
+        print_status "warning" "  Metrics not available for $name"
+    fi
+    
+    rm -f "$temp_file"
 }
 
 # Function to check TCP port health
@@ -213,25 +262,34 @@ perform_health_check() {
     echo "================================================"
     echo ""
     
-    # Check HTTP endpoints
+    # Check HTTP health endpoints
     for service in "${!SERVICE_ENDPOINTS[@]}"; do
         check_http_endpoint "$service" "${SERVICE_ENDPOINTS[$service]}"
+        
+        # Also check metrics if available
+        if [ -n "${SERVICE_METRICS[$service]:-}" ]; then
+            check_metrics_endpoint "$service" "${SERVICE_METRICS[$service]}"
+        fi
+        echo ""
     done
     
-    # Check TCP ports
+    # Check TCP ports for additional validation
     for service in "${!SERVICE_PORTS[@]}"; do
         check_tcp_port "$service" "localhost" "${SERVICE_PORTS[$service]}"
     done
     
-    # Check database
-    check_database_health
-    
-    # Check Discord bot
-    check_discord_bot_health
+    # Check Docker container health if in local environment
+    if [ "$ENVIRONMENT" = "local" ]; then
+        check_docker_health
+    fi
     
     # Check system resources
     echo ""
     check_memory_health
+    
+    # Check service dependencies
+    echo ""
+    check_service_dependencies
     
     # Generate summary
     echo ""
@@ -240,6 +298,7 @@ perform_health_check() {
     echo "================================================"
     echo "Total Checks: $TOTAL_CHECKS"
     echo "Healthy: $HEALTHY_CHECKS"
+    echo "Degraded: $(echo "${HEALTH_STATUS[@]}" | tr ' ' '\n' | grep -c "degraded" || echo "0")"
     echo "Unhealthy: $((TOTAL_CHECKS - HEALTHY_CHECKS))"
     echo ""
     
@@ -253,6 +312,9 @@ perform_health_check() {
             "healthy")
                 echo -e "  ${GREEN}✓${NC} $service: $status (Response: ${response_time}s)"
                 ;;
+            "degraded")
+                echo -e "  ${YELLOW}!${NC} $service: $status (Response: ${response_time}s)"
+                ;;
             "unhealthy")
                 echo -e "  ${RED}✗${NC} $service: $status"
                 ;;
@@ -265,12 +327,90 @@ perform_health_check() {
     echo "================================================"
     
     # Return appropriate exit code
+    local degraded_count=$(echo "${HEALTH_STATUS[@]}" | tr ' ' '\n' | grep -c "degraded" || echo "0")
     if [ $HEALTHY_CHECKS -eq $TOTAL_CHECKS ]; then
         print_status "success" "All services are healthy!"
+        return 0
+    elif [ $degraded_count -gt 0 ] && [ $((HEALTHY_CHECKS + degraded_count)) -eq $TOTAL_CHECKS ]; then
+        print_status "warning" "Some services are degraded but functional!"
         return 0
     else
         print_status "error" "Some services are unhealthy!"
         return 1
+    fi
+}
+
+# Function to check Docker container health
+check_docker_health() {
+    print_status "info" "Checking Docker container health..."
+    
+    if command -v docker >/dev/null 2>&1; then
+        local containers=("once-human-rag" "once-human-bot")
+        
+        for container in "${containers[@]}"; do
+            if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -q "$container"; then
+                local health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "no-healthcheck")
+                local container_status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "unknown")
+                
+                if [ "$health_status" = "healthy" ]; then
+                    print_status "success" "Container $container: healthy"
+                elif [ "$health_status" = "unhealthy" ]; then
+                    print_status "error" "Container $container: unhealthy"
+                elif [ "$container_status" = "running" ]; then
+                    print_status "info" "Container $container: running (no health check)"
+                else
+                    print_status "error" "Container $container: $container_status"
+                fi
+            else
+                print_status "warning" "Container $container: not found or not running"
+            fi
+        done
+    else
+        print_status "warning" "Docker not available for container health checks"
+    fi
+}
+
+# Function to check service dependencies
+check_service_dependencies() {
+    print_status "info" "Checking service dependencies..."
+    
+    # Check if RAG service can reach ChromaDB
+    if [ -n "${SERVICE_ENDPOINTS[rag-service]:-}" ]; then
+        local rag_health_url="${SERVICE_ENDPOINTS[rag-service]}"
+        local temp_file=$(mktemp)
+        
+        if curl -s --connect-timeout 5 --max-time 10 -o "$temp_file" "$rag_health_url" 2>/dev/null; then
+            if command -v jq >/dev/null 2>&1; then
+                local chromadb_status=$(jq -r '.checks.chromadb_client.status // "unknown"' "$temp_file" 2>/dev/null)
+                local collection_status=$(jq -r '.checks.chromadb_collection.status // "unknown"' "$temp_file" 2>/dev/null)
+                
+                if [ "$chromadb_status" = "healthy" ] && [ "$collection_status" = "healthy" ]; then
+                    print_status "success" "RAG service → ChromaDB: healthy"
+                else
+                    print_status "error" "RAG service → ChromaDB: $chromadb_status/$collection_status"
+                fi
+            fi
+        fi
+        rm -f "$temp_file"
+    fi
+    
+    # Check if Discord bot can reach RAG service
+    if [ -n "${SERVICE_ENDPOINTS[discord-bot]:-}" ]; then
+        local bot_health_url="${SERVICE_ENDPOINTS[discord-bot]}"
+        local temp_file=$(mktemp)
+        
+        if curl -s --connect-timeout 5 --max-time 10 -o "$temp_file" "$bot_health_url" 2>/dev/null; then
+            if command -v jq >/dev/null 2>&1; then
+                local rag_connectivity=$(jq -r '.checks.rag_service.status // "unknown"' "$temp_file" 2>/dev/null)
+                
+                if [ "$rag_connectivity" = "healthy" ]; then
+                    print_status "success" "Discord bot → RAG service: healthy"
+                else
+                    print_status "error" "Discord bot → RAG service: $rag_connectivity"
+                fi
+            fi
+        fi
+        rm -f "$temp_file"
     fi
 }
 
