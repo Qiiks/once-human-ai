@@ -9,6 +9,8 @@ services:
       context: .
       dockerfile: rag_pipeline/Dockerfile
     container_name: once-human-rag
+    ports:
+      - "5000:5000"
     env_file:
       - .env
     environment:
@@ -95,7 +97,10 @@ services:
       - "coolify.healthcheck.interval=30s"
       - "coolify.healthcheck.timeout=10s"
       - "coolify.healthcheck.retries=3"
-      - "traefik.enable=false"  # Internal service only
+      - "traefik.enable=true"  # Enable external access through reverse proxy
+      - "traefik.http.routers.rag-service.rule=PathPrefix(`/rag`)"
+      - "traefik.http.routers.rag-service.entrypoints=web,websecure"
+      - "traefik.http.services.rag-service.loadbalancer.server.port=5000"
 
   discord-bot:
     build:
