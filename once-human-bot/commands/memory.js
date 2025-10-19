@@ -33,24 +33,28 @@ module.exports = {
         }
 
         if (subcommand === 'view') {
-            const memories = getMemories(userIdToManage);
+            await interaction.deferReply({ ephemeral: true });
+            
+            const memories = await getMemories(userIdToManage);
             if (memories.size === 0) {
-                return interaction.reply({ content: 'No memories found for this user.', ephemeral: true });
+                return interaction.editReply({ content: 'No memories found for this user.' });
             }
 
             let response = 'Here are the memories I have for this user:\n';
             for (const [key, value] of memories.entries()) {
                 response += `**${key}:** ${value}\n`;
             }
-            return interaction.reply({ content: response, ephemeral: true });
+            return interaction.editReply({ content: response });
         }
 
         if (subcommand === 'forget') {
-            const success = deleteMemory(userIdToManage, key);
+            await interaction.deferReply({ ephemeral: true });
+            
+            const success = await deleteMemory(userIdToManage, key);
             if (success) {
-                return interaction.reply({ content: `I have forgotten the memory with the key "${key}".`, ephemeral: true });
+                return interaction.editReply({ content: `I have forgotten the memory with the key "${key}".` });
             } else {
-                return interaction.reply({ content: `I could not find a memory with the key "${key}".`, ephemeral: true });
+                return interaction.editReply({ content: `I could not find a memory with the key "${key}".` });
             }
         }
     },
