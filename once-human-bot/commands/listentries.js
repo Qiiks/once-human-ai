@@ -1,8 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { PermissionsBitField } = require('discord.js');
-const axios = require('axios');
-
-const RAG_SERVICE_URL = 'http://localhost:5000';
+const { getSupabaseClient } = require('../utils/supabaseClient');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -16,15 +14,20 @@ module.exports = {
         await interaction.deferReply({ ephemeral: true });
 
         try {
-            const response = await axios.get(`${RAG_SERVICE_URL}/documents`);
-            const documents = response.data.documents;
+            const supabase = getSupabaseClient();
+            const { data: entries, error } = await supabase
+                .from('lore_entries')
+                .select('name, type')
+                .order('name');
 
-            if (!documents || documents.length === 0) {
+            if (error) throw error;
+
+            if (!entries || entries.length === 0) {
                 return interaction.editReply({ content: 'There are no entries in the knowledge base.' });
             }
 
-            const entryNames = documents.map(doc => `- ${doc.metadata.name}`);
-            const message = `**Knowledge Base Entries:**\n${entryNames.join('\n')}`;
+            const entryNames = entries.map(entry => `- **${entry.name}** (${entry.type})`);
+            const message = `**Knowledge Base Entries (${entries.length} total):**\n${entryNames.join('\n')}`;
 
             // Split the message if it's too long for a single Discord reply
             if (message.length <= 2000) {

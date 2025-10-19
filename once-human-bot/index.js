@@ -3,25 +3,22 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const fs = require('fs');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { LocalRAGSystem } = require('./utils/localRAG');
+const { IntegratedRAGSystem } = require('./utils/integratedRAG');
+const { initializeSupabase } = require('./utils/supabaseClient');
 
 // Configuration validation schema
 const configSchema = {
     required: [
         'DISCORD_BOT_TOKEN',
-        'GEMINI_API_KEYS'
+        'GEMINI_API_KEYS',
+        'SUPABASE_URL',
+        'SUPABASE_KEY'
     ],
     optional: [
-        'RAG_SERVICE_URL',
-        'RAG_SERVICE_FALLBACK_URLS',
-        'SERVICE_DISCOVERY_TIMEOUT',
-        'SERVICE_DISCOVERY_RETRIES',
-        'DATABASE_PATH',
         'LOG_LEVEL',
         'NODE_ENV'
     ],
     validation: {
-        'RAG_SERVICE_URL': /^https?:\/\/.+:\d+$/,
         'DISCORD_BOT_TOKEN': /^[A-Za-z0-9._-]+$/,
         'LOG_LEVEL': ['debug', 'info', 'warn', 'error']
     }
@@ -52,9 +49,7 @@ function validateEnvironment() {
     }
 
     // Check optional but recommended variables
-    if (!process.env.RAG_SERVICE_URL) {
-        warnings.push('RAG_SERVICE_URL not set, using default: http://rag-service:5000');
-    }
+    // RAG_SERVICE_URL is no longer needed - using integrated RAG with PostgreSQL
 
     if (!process.env.DATABASE_PATH) {
         warnings.push('DATABASE_PATH not set, using default: /data/memory.db');
@@ -79,14 +74,31 @@ function validateEnvironment() {
     console.log('Current configuration:');
     console.log(`  - NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
     console.log(`  - LOG_LEVEL: ${process.env.LOG_LEVEL || 'info'}`);
-    console.log(`  - RAG_SERVICE_URL: ${process.env.RAG_SERVICE_URL || 'http://rag-service:5000'}`);
-    console.log(`  - DATABASE_PATH: ${process.env.DATABASE_PATH || '/data/memory.db'}`);
-    console.log(`  - SERVICE_DISCOVERY_TIMEOUT: ${process.env.SERVICE_DISCOVERY_TIMEOUT || '30000'}ms`);
-    console.log(`  - SERVICE_DISCOVERY_RETRIES: ${process.env.SERVICE_DISCOVERY_RETRIES || '3'}`);
+    console.log(`  - Supabase configured: ${!!process.env.SUPABASE_URL}`);
+    console.log(`  - Gemini API keys configured: ${!!process.env.GEMINI_API_KEYS}`);
 }
 
 // Validate environment before starting
 validateEnvironment();
+
+// Initialize Supabase
+async function initializeServices() {
+    try {
+        console.log('Initializing Supabase...');
+        await initializeSupabase();
+        console.log('✅ Supabase initialized successfully');
+    } catch (error) {
+        console.error('❌ Failed to initialize Supabase:', error);
+        console.error('Please ensure SUPABASE_URL and SUPABASE_KEY environment variables are set.');
+        process.exit(1);
+    }
+}
+
+// Call initialization before creating Discord client
+initializeServices().catch(error => {
+    console.error('Failed to initialize services:', error);
+    process.exit(1);
+});
 
 // Initialize HTTP server for health checks
 const http = require('http');
@@ -130,104 +142,28 @@ const healthServer = http.createServer(async (req, res) => {
             overallHealthy = false;
         }
         
-        // RAG service connectivity check
-        const ragUrl = process.env.RAG_SERVICE_URL || 'http://rag-service:5000';
-        try {
-            const ragHealthResponse = await fetch(`${ragUrl}/health`, {
-                method: 'GET',
-                timeout: 5000,
-                headers: { 'Content-Type': 'application/json' }
-            });
-            
-            if (ragHealthResponse.ok) {
-                const ragHealth = await ragHealthResponse.json();
-                healthStatus.checks.rag_service = {
-                    status: ragHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
-                    message: `RAG service is ${ragHealth.status}`,
-                    url: ragUrl,
-                    response_time_ms: ragHealthResponse.headers.get('x-response-time') || 'unknown',
-                    rag_checks: ragHealth.checks || {}
-                };
-                
-                if (ragHealth.status !== 'healthy') {
-                    overallHealthy = false;
-                }
-            } else {
-                healthStatus.checks.rag_service = {
-                    status: 'unhealthy',
-                    message: `RAG service returned status ${ragHealthResponse.status}`,
-                    url: ragUrl
-                };
-                overallHealthy = false;
-            }
-        } catch (error) {
-            healthStatus.checks.rag_service = {
-                status: 'unhealthy',
-                message: `RAG service connection failed: ${error.message}`,
-                url: ragUrl,
-                error: error.name
-            };
-            overallHealthy = false;
-        }
-        
-        // Environment configuration check
-        const requiredEnvVars = ['DISCORD_BOT_TOKEN', 'GEMINI_API_KEYS'];
-        const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-        if (missingVars.length > 0) {
-            healthStatus.checks.environment = {
-                status: 'unhealthy',
-                message: `Missing required environment variables: ${missingVars.join(', ')}`,
-                missing_vars: missingVars
-            };
-            overallHealthy = false;
-        } else {
-            healthStatus.checks.environment = {
-                status: 'healthy',
-                message: 'All required environment variables are set'
-            };
-        }
-        
-        // Memory usage check
-        try {
-            const memUsage = process.memoryUsage();
-            const memUsageMB = {
-                rss: Math.round(memUsage.rss / 1024 / 1024),
-                heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
-                heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
-                external: Math.round(memUsage.external / 1024 / 1024)
-            };
-            
-            healthStatus.checks.memory = {
-                status: memUsageMB.heapUsed < 500 ? 'healthy' : 'warning',
-                message: `Memory usage: ${memUsageMB.heapUsed}MB heap used`,
-                memory_mb: memUsageMB
-            };
-        } catch (error) {
-            healthStatus.checks.memory = {
-                status: 'error',
-                message: `Memory check failed: ${error.message}`
-            };
-        }
-        
-        // RAG System initialization check
+        // RAG System health check (integrated, no external service)
         if (client.ragSystem) {
             try {
-                // Test if RAG system is properly initialized
+                const isHealthy = await client.ragSystem.checkHealth();
                 healthStatus.checks.rag_system = {
-                    status: 'healthy',
-                    message: 'Local RAG system is initialized'
+                    status: isHealthy ? 'healthy' : 'unhealthy',
+                    message: isHealthy ? 'Integrated RAG system is operational' : 'RAG system health check failed'
                 };
+                if (!isHealthy) {
+                    overallHealthy = false;
+                }
             } catch (error) {
                 healthStatus.checks.rag_system = {
                     status: 'unhealthy',
-                    message: `RAG system initialization failed: ${error.message}`
+                    message: `RAG system check failed: ${error.message}`
                 };
                 overallHealthy = false;
             }
         } else {
             healthStatus.checks.rag_system = {
                 status: 'unhealthy',
-                message: 'RAG system is not initialized'
+                message: 'Integrated RAG system is not initialized'
             };
             overallHealthy = false;
         }
@@ -287,9 +223,6 @@ process.on('SIGINT', () => {
     });
 });
 
-// Load structured data
-client.gameEntities = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'rag_pipeline', 'game_entities.json'), 'utf8'));
-
 
 // Initialize Google Generative AI
 const keyManager = require('./utils/keyManager');
@@ -300,8 +233,8 @@ client.gemini = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 client.geminiFallback = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 client.embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' }); // Initialize embedding model
 
-// Initialize the RAG System and attach it to the client
-client.ragSystem = new LocalRAGSystem(keyManager);
+// Initialize the Integrated RAG System and attach it to the client
+client.ragSystem = new IntegratedRAGSystem(keyManager);
 
 // Command and Event Handlers
 client.commands = new Collection();

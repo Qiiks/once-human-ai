@@ -1,75 +1,6 @@
 version: '3.8'
 
 services:
-  rag-service:
-    build:
-      context: .
-      dockerfile: rag_pipeline/Dockerfile
-    container_name: once-human-rag
-    env_file:
-      - .env
-    environment:
-      # Tier 1: Core Service Configuration
-      - SERVICE_NAME=rag-service
-      - SERVICE_VERSION=1.0.0
-      - ENVIRONMENT=development
-      
-      # Service Binding
-      - FLASK_HOST=0.0.0.0
-      - FLASK_PORT=5000
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
-      
-      # Tier 3: Infrastructure Configuration
-      - CHROMA_DB_PATH=/data/chroma_db
-      - SENTENCE_TRANSFORMERS_HOME=/app/model_cache
-      - DATABASE_PATH=/data/memory.db
-      
-      # Logging and monitoring
-      - LOG_LEVEL=info
-      - PYTHONUNBUFFERED=1
-      
-      # Health check configuration
-      - HEALTH_CHECK_INTERVAL=30s
-      - METRICS_ENABLED=true
-    volumes:
-      - chroma_db:/data/chroma_db
-      - sqlite_db:/data
-      - model_cache:/app/model_cache
-    networks:
-      app-network:
-        aliases:
-          - rag-service
-          - rag-api
-          - vector-db-service
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "
-        import requests, sys;
-        try:
-          r = requests.get('http://127.0.0.1:5000/health', timeout=10);
-          if r.status_code == 200:
-            health_data = r.json();
-            sys.exit(0 if health_data.get('status') == 'healthy' else 1)
-          else:
-            sys.exit(1)
-        except Exception as e:
-          print(f'Health check failed: {e}');
-          sys.exit(1)
-      "]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 90s  # Allow extra time for model loading and ChromaDB initialization
-    deploy:
-      resources:
-        limits:
-          cpus: '1.5'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
-
   discord-bot:
     build:
       context: .
@@ -78,56 +9,13 @@ services:
     env_file:
       - .env
     environment:
-      # Tier 1: Core Service Configuration
-      - SERVICE_NAME=discord-bot
-      - SERVICE_VERSION=1.0.0
-      - ENVIRONMENT=development
-      - NODE_ENV=development
-      
-      # Tier 2: Service Discovery Configuration
-      - RAG_SERVICE_URL=http://rag-service:5000
-      - RAG_SERVICE_HEALTH_ENDPOINT=/health
-      - RAG_SERVICE_TIMEOUT=30000
-      
-      # Fallback configuration
-      - RAG_SERVICE_FALLBACK_URLS=http://localhost:5000,http://127.0.0.1:5000
-      - RAG_SERVICE_DISCOVERY_STRATEGY=dns-first
-      
-      # Circuit breaker configuration
-      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
-      - CIRCUIT_BREAKER_TIMEOUT=60000
-      - CIRCUIT_BREAKER_RESET_TIMEOUT=300000
-      
-      # Service discovery timeouts and retries
-      - SERVICE_DISCOVERY_TIMEOUT=30000
-      - SERVICE_DISCOVERY_RETRIES=3
-      - SERVICE_DISCOVERY_BACKOFF=exponential
-      
-      # Tier 3: Infrastructure Configuration
-      - DATABASE_PATH=/data/memory.db
-      
-      # Network configuration
-      - DOCKER_NETWORK_NAME=once-human-network
-      - INTERNAL_NETWORK_ONLY=false
-      - ENABLE_EXTERNAL_ACCESS=false
-      
-      # Logging and monitoring
+      - NODE_ENV=production
       - LOG_LEVEL=info
-      - HEALTH_CHECK_INTERVAL=30s
-      - METRICS_ENABLED=true
-      
-      # Health check port (for internal health endpoint)
       - HEALTH_CHECK_PORT=3000
-    volumes:
-      - sqlite_db:/data
+    ports:
+      - "3000:3000"
     networks:
-      app-network:
-        aliases:
-          - discord-bot
-          - bot-service
-    depends_on:
-      rag-service:
-        condition: service_healthy
+      - app-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "
@@ -168,33 +56,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.75'
-          memory: 768M
+          cpus: '1.0'
+          memory: 1G
         reservations:
-          cpus: '0.25'
-          memory: 256M
-
-volumes:
-  chroma_db:
-    driver: local
-    name: once-human-chroma-db
-  sqlite_db:
-    driver: local
-    name: once-human-sqlite-db
-  model_cache:
-    driver: local
-    name: once-human-model-cache
+          cpus: '0.5'
+          memory: 512M
 
 networks:
   app-network:
     driver: bridge
     name: once-human-network
-    internal: false  # Allow external access for development
-    labels:
-      - "coolify.managed=true"
-      - "coolify.network=internal"
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.20.0.0/16
-          gateway: 172.20.0.1

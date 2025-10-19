@@ -41,18 +41,6 @@ module.exports = {
             console.log('Attempting to send initial "Thinking..." message.');
             thinkingMessage = await message.channel.send('Thinking...');
             console.log('Initial "Thinking..." message sent. Message ID:', thinkingMessage.id);
-            
-            // Check RAG service health before proceeding
-            try {
-                const isHealthy = await ragSystem.checkHealth();
-                if (!isHealthy) {
-                    throw new Error('RAG service is not available');
-                }
-            } catch (error) {
-                await thinkingMessage.edit('Sorry, the knowledge base is currently unavailable. Please try again later.');
-                console.error('RAG service health check failed:', error);
-                return;
-            }
 
             let rawQuery = (channelId === assignedChannelId)
                 ? message.content

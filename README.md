@@ -1,279 +1,404 @@
-# Once Human AI Knowledge Steward
+# Once Human AI - Discord Bot with Integrated RAG
 
-## Overview
+A production-ready Discord bot powered by Google Gemini and Supabase, featuring an integrated Retrieval-Augmented Generation (RAG) system for delivering accurate game knowledge directly within Discord.
 
-The Once Human AI Knowledge Steward is a specialized Discord bot designed to answer questions and provide information about the game "Once Human." It leverages a Retrieval-Augmented Generation (RAG) pipeline to process in-game knowledge from PDF documents and deliver accurate, context-aware responses to users within Discord servers.
+## 🎯 Project Overview
 
-## Architecture
+This project demonstrates a complete, scalable Discord bot architecture that combines:
+- **Real-time chat interactions** via Discord.js
+- **Advanced AI generation** using Google Gemini
+- **Integrated RAG pipeline** for context-aware responses
+- **Cloud database** with Supabase PostgreSQL
+- **Production-grade health checks** and monitoring
 
-The system consists of two microservices working in tandem:
+Perfect for portfolios showcasing full-stack bot development, AI integration, and system design.
 
-*   **`discord-bot`**: A Node.js-based Discord bot that serves as the user interface. It handles Discord interactions, manages conversations, and communicates with the RAG service to fetch answers.
-*   **`rag-service`**: A Python-based REST API responsible for knowledge processing. It ingests PDF documents, creates vector embeddings using ChromaDB, and provides semantic search capabilities for accurate information retrieval.
+## 🏗️ Architecture
 
-## Features
-
-### Core Functionality
-*   **Ask Questions**: Use the `/oh` command to ask anything about "Once Human"
-*   **Knowledge Management**: Add new information to the knowledge base with `/add-lore`
-*   **Memory System**: Persistent conversation memory with intelligent context management
-*   **Research Capabilities**: Advanced research planning and execution system
-
-### Administrative Features
-*   **Channel Management**: Restrict bot to specific channels using `/setChannel` and `/unsetChannel`
-*   **Conversation Management**: Clear chat history with `/clearchathistory`
-*   **Data Integrity**: List and manage knowledge base entries with `/listentries` and `/fixmeta`
-*   **Admin Utilities**: Access administrative functions via `/admin`
-
-## Prerequisites
-
-Before deploying the application, ensure you have:
-
-*   **Docker** (version 20.10 or higher)
-*   **Docker Compose** (version 2.0 or higher)
-*   **Git** for version control
-*   **Discord Bot Token** from [Discord Developer Portal](https://discord.com/developers/applications)
-*   **Google Gemini API Keys** from [Google AI Studio](https://makersuite.google.com/app/apikey)
-*   **Coolify** instance (for production deployment) or local Docker environment
-
-## Quick Start
-
-### 1. Clone the Repository
-```bash
-git clone <your-repository-url>
-cd once-human-bot
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Discord Server                           │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                    /oh ask "what is..."
+                             │
+                             ▼
+        ┌────────────────────────────────────────┐
+        │      Discord.js Bot (Node.js)          │
+        │  ┌──────────────────────────────────┐  │
+        │  │  Integrated RAG System           │  │
+        │  │  - Tool calling with Gemini      │  │
+        │  │  - Vector search via Supabase    │  │
+        │  │  - Memory management             │  │
+        │  └──────────────────────────────────┘  │
+        └────────────────────────────────────────┘
+                             │
+                  ┌──────────┼──────────┐
+                  │                     │
+                  ▼                     ▼
+        ┌─────────────────┐   ┌─────────────────┐
+        │ Google Gemini   │   │   Supabase      │
+        │ API             │   │   PostgreSQL    │
+        │ - Embeddings    │   │   - Lore DB     │
+        │ - Chat          │   │   - User Memory │
+        │ - Tool Calling  │   │   - Chat History│
+        └─────────────────┘   └─────────────────┘
 ```
 
-### 2. Configure Environment Variables
+### Key Components
+
+1. **Discord Bot (index.js)**
+   - Handles Discord events and commands
+   - Manages bot lifecycle and health checks
+   - Coordinates between user input and RAG system
+
+2. **Integrated RAG System (integratedRAG.js)**
+   - Processes queries using semantic search
+   - Calls Gemini for embeddings and generation
+   - Manages tool interactions (add lore, search, save memories)
+   - No external service dependency
+
+3. **Supabase Integration (supabaseClient.js)**
+   - PostgreSQL database for persistence
+   - Vector-ready for future similarity searches
+   - Real-time sync capabilities
+
+4. **Commands** (/commands)
+   - `/oh ask <query>` - Ask the bot about Once Human
+   - `/memory view` - View your saved memories
+   - `/add-lore` - Add new knowledge (admin only)
+   - `/research` - Advanced research capabilities
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 18+
+- Supabase account (free tier works great)
+- Google Gemini API key
+- Discord bot token
+
+### Installation
+
+1. **Clone the repository**
 ```bash
-# Copy the example environment file
+git clone https://github.com/yourusername/once-human-ai.git
+cd once-human-ai/once-human-bot
+```
+
+2. **Install dependencies**
+```bash
+npm install
+```
+
+3. **Set up Supabase**
+   - Create a new Supabase project at https://supabase.com
+   - Copy your project URL and anon key
+   - Run the migration SQL (see Setup section below)
+
+4. **Configure environment**
+```bash
 cp .env.example .env
-
-# Edit .env with your actual values
-nano .env
+# Edit .env with your credentials:
+# - DISCORD_BOT_TOKEN
+# - GEMINI_API_KEYS
+# - SUPABASE_URL
+# - SUPABASE_KEY
 ```
 
-Required environment variables:
-- `DISCORD_BOT_TOKEN`: Your Discord bot token
-- `GEMINI_API_KEYS`: Comma-separated list of Gemini API keys
-
-### 3. Local Development Setup
+5. **Run the bot**
 ```bash
-# Start the application using Docker Compose
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop the application
-docker-compose down
+npm start
 ```
 
-## Deployment
+## 📋 Setup Instructions
 
-### Local Development with Docker Compose
+### Database Setup
 
-The project includes a complete Docker Compose setup for local development:
+Run the SQL migration in your Supabase project:
 
-```bash
-# Build and start services
-docker-compose up --build
-
-# Run with development overrides (includes Adminer for database inspection)
-docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+```sql
+-- Navigate to Supabase SQL Editor and run:
+-- File: supabase_migration.sql
 ```
 
-### Production Deployment on Coolify
+This creates:
+- `memories` table - User memories and preferences
+- `lore_entries` table - Game knowledge base
+- `chat_history` table - Conversation tracking
+- Proper indexes for performance
+- Row-level security policies
 
-For production deployment using Coolify, see the comprehensive [DEPLOYMENT.md](DEPLOYMENT.md) guide. Key steps include:
+### Discord Server Setup
 
-1. **Prepare your repository** with Docker Compose configuration
-2. **Configure Coolify** with your Git repository
-3. **Set environment variables** in Coolify's UI
-4. **Deploy** using Coolify's one-click deployment
-
-### Environment Variable Configuration
-
-All sensitive configuration is managed through environment variables:
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DISCORD_BOT_TOKEN` | Discord bot authentication token | Yes |
-| `GEMINI_API_KEYS` | Comma-separated Google AI API keys | Yes |
-| `CHROMA_DB_PATH` | ChromaDB storage path (default: `/data/chroma_db`) | No |
-| `DATABASE_PATH` | SQLite database path (default: `/data/memory.db`) | No |
-| `RAG_SERVICE_URL` | Internal RAG service URL (default: `http://rag-service:5000`) | No |
-
-### Database Migration
-
-For initial setup or after schema changes:
-
-```bash
-# Run migrations
-docker-compose exec rag-service python run_migrations.py
-
-# Rebuild knowledge base from PDFs
-docker-compose exec rag-service python rebuild_db.py
-```
-
-### Persistent Storage
-
-The application uses Docker volumes for data persistence:
-
-- **`chroma_db`**: Vector database for knowledge storage
-- **`sqlite_db`**: Bot memory and configuration
-- **`model_cache`**: Pre-trained model cache
-
-## Project Structure
-
-```
-once-human-bot/
-├── once-human-bot/          # Discord bot (Node.js)
-│   ├── commands/            # Bot command implementations
-│   ├── events/              # Discord event handlers
-│   ├── utils/               # Utility modules
-│   └── index.js             # Main bot entry point
-├── rag_pipeline/            # RAG service (Python)
-│   ├── rag_service.py       # Flask API server
-│   ├── process_pdf.py       # PDF processing utilities
-│   └── requirements.txt     # Python dependencies
-├── OncehumanPDFs/           # Source knowledge documents
-├── docker-compose.yml       # Main Docker Compose configuration
-├── docker-compose.prod.yml  # Production overrides
-└── .env.example             # Environment variable template
-```
-
-## Development
-
-### Running Tests
-```bash
-# Run bot tests
-docker-compose exec discord-bot npm test
-
-# Run RAG service tests
-docker-compose exec rag-service python -m pytest
-```
-
-### Adding New Commands
-1. Create a new file in `once-human-bot/commands/`
-2. Implement the command following the existing pattern
-3. The bot will automatically load new commands on restart
-
-### Updating the Knowledge Base
-1. Add PDF files to the `OncehumanPDFs/` directory
-2. Run the rebuild script:
-   ```bash
-   docker-compose exec rag-service python rebuild_db.py
+1. Invite the bot to your server using this URL:
+   ```
+   https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=268435456&scope=bot%20applications.commands
    ```
 
-## Troubleshooting
+2. The bot automatically registers slash commands:
+   - `/oh` - Main interaction command
+   - `/memory` - Memory management
+   - `/add-lore` - Add knowledge (admin)
+   - `/research` - Research system (admin)
 
-### Common Issues
+## 💻 Development
 
-#### Bot Not Responding
-- Check Discord bot token is valid
-- Verify bot has proper permissions in the Discord server
-- Check logs: `docker-compose logs discord-bot`
+### Project Structure
+```
+once-human-bot/
+├── commands/              # Slash command implementations
+│   ├── oh.js             # Main interaction command
+│   ├── memory.js         # Memory management
+│   ├── add-lore.js       # Knowledge base management
+│   └── research.js       # Research capabilities
+├── events/               # Discord event handlers
+│   ├── ready.js          # Bot startup
+│   ├── messageCreate.js  # Message handling
+│   └── interactionCreate.js
+├── utils/
+│   ├── integratedRAG.js  # RAG system core
+│   ├── supabaseClient.js # Database connection
+│   ├── memoryManager.js  # User memories
+│   ├── keyManager.js     # API key rotation
+│   └── ...
+├── index.js              # Bot entry point
+└── package.json
 
-#### RAG Service Connection Failed
-- Ensure both services are running: `docker-compose ps`
-- Check internal network connectivity
-- Verify RAG_SERVICE_URL is correct
+rag_pipeline/            # Legacy (for data migration)
+├── chroma_db/          # ChromaDB data (migrate to Supabase)
+└── ...
 
-#### Memory Database Errors
-- Check volume permissions
-- Ensure SQLite database is not corrupted
-- Run migrations if needed
-
-#### High Memory Usage
-- Adjust resource limits in `docker-compose.prod.yml`
-- Monitor with: `docker stats`
-- Consider increasing server resources
-
-### Logs and Debugging
-
-```bash
-# View all logs
-docker-compose logs
-
-# Follow specific service logs
-docker-compose logs -f discord-bot
-docker-compose logs -f rag-service
-
-# Check service status
-docker-compose ps
-
-# Access service shell for debugging
-docker-compose exec discord-bot sh
-docker-compose exec rag-service bash
+OncehumanPDFs/          # Knowledge base source documents
 ```
 
-## Monitoring
+### Adding a New Command
 
-### Health Checks
-Both services include health checks that monitor:
-- Service availability
-- Database connectivity
-- API responsiveness
+Create a new file in `commands/`:
 
-### Resource Monitoring
-```bash
-# Monitor resource usage
-docker stats
+```javascript
+const { SlashCommandBuilder } = require('discord.js');
 
-# Check volume usage
-docker system df -v
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('mycommand')
+        .setDescription('Description of my command')
+        .addStringOption(option => 
+            option.setName('input')
+                  .setDescription('Input text')
+                  .setRequired(true)),
+    
+    async execute(interaction) {
+        await interaction.reply('Response here');
+    }
+};
 ```
 
-## Backup and Recovery
+The bot automatically loads new commands on startup.
 
-### Automated Backups
-The production configuration includes daily backups for:
-- ChromaDB vector database
-- SQLite memory database
+### Working with the RAG System
 
-### Manual Backup
-```bash
-# Backup all volumes
-docker run --rm -v once-human-chroma-db:/data -v $(pwd):/backup alpine tar czf /backup/chroma-backup.tar.gz /data
-docker run --rm -v once-human-sqlite-db:/data -v $(pwd):/backup alpine tar czf /backup/sqlite-backup.tar.gz /data
+```javascript
+// Query the knowledge base
+const result = await client.ragSystem.retrieveAndGenerate(
+    userQuery,
+    chatHistory,
+    client,
+    message
+);
 
-# Restore from backup
-docker run --rm -v once-human-chroma-db:/data -v $(pwd):/backup alpine tar xzf /backup/chroma-backup.tar.gz -C /
-docker run --rm -v once-human-sqlite-db:/data -v $(pwd):/backup alpine tar xzf /backup/sqlite-backup.tar.gz -C /
+// Add knowledge
+await supabase.from('lore_entries').insert({
+    name: 'Item Name',
+    type: 'Item',
+    content: 'Full description',
+    metadata: { /* structured data */ }
+});
+
+// Get user memories
+const memories = await supabase
+    .from('memories')
+    .select('*')
+    .eq('user_id', userId);
 ```
 
-## Contributing
+## 🔧 Configuration
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -am 'Add new feature'`
-4. Push to branch: `git push origin feature/your-feature`
-5. Submit a pull request
+### Environment Variables
 
-## Security
+**Required:**
+- `DISCORD_BOT_TOKEN` - Bot authentication token
+- `GEMINI_API_KEYS` - Google Gemini API key(s)
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase anon key
 
-- Never commit `.env` files or API keys
-- Rotate API keys regularly
-- Use Coolify's secret management for production
-- Keep dependencies updated
-- Monitor for security advisories
+**Optional:**
+- `NODE_ENV` - Environment (production/development)
+- `LOG_LEVEL` - Logging level (debug/info/warn/error)
+- `HEALTH_CHECK_PORT` - Health check server port (default: 3000)
 
-## Support
+### Supabase Connection String
 
-For issues and questions:
-1. Check the [Troubleshooting](#troubleshooting) section
-2. Review logs for error messages
-3. Open an issue on GitHub
-4. Contact the maintainers
+If using PostgreSQL connection string directly:
+```
+POSTGRES_URL=postgresql://user:password@host:port/database
+```
 
-## License
+The bot automatically converts this format.
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## 📊 Health Checks
 
-## Acknowledgments
+The bot includes comprehensive health monitoring:
 
-- Discord.js community for the excellent bot framework
-- Google for the Gemini AI API
-- ChromaDB team for the vector database
-- Once Human game community for the knowledge contributions
+- **Discord connection** - Bot readiness
+- **Supabase connectivity** - Database health
+- **RAG system** - Knowledge base availability
+- **Memory usage** - Heap and RSS tracking
+- **Environment validation** - Required variables
+
+Access health status:
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/metrics
+```
+
+## 🔄 Data Migration
+
+### From ChromaDB to Supabase
+
+The `rag_pipeline/chroma_db/` directory contains your existing vector data. To migrate:
+
+1. Export from ChromaDB:
+```python
+import chromadb
+client = chromadb.PersistentClient(path='./rag_pipeline/chroma_db')
+collection = client.get_collection('once_human_knowledge')
+```
+
+2. Import to Supabase:
+```javascript
+// Use the RAG system to add each entry
+for (const entry of exported_entries) {
+    await ragSystem.add_lore_tool({
+        entry_name: entry.name,
+        entry_type: entry.type,
+        description: entry.content
+    }, message, client);
+}
+```
+
+Existing database files are preserved in:
+- `rag_pipeline/chroma_db/` - ChromaDB data
+- `rag_pipeline/backupppp/` - Backup copies
+- `chroma.sqlite3` - SQLite memory database
+
+## 🎨 Features Showcase
+
+### Smart Tool Calling
+The bot automatically detects user intent and calls appropriate tools:
+- **Search** - `"What is...?"` → searches knowledge base
+- **Add** - `"Save this..."` → stores new information
+- **Update** - `"Correct that..."` → updates existing entries
+- **Remember** - `"Remember I..."` → stores user preferences
+
+### Memory System
+- Per-user memory storage
+- Contextual memory injection into responses
+- Memory management commands
+
+### Research System
+- Multi-step research planning
+- Execution tracking
+- Result aggregation
+
+### Channel Management
+- Restrict bot to specific channels
+- Per-channel conversation history
+- Automatic summarization for long conversations
+
+## 🧪 Testing
+
+Health check endpoint for validation:
+```bash
+# Check bot health
+curl http://localhost:3000/health
+
+# Get metrics
+curl http://localhost:3000/metrics
+```
+
+## 📚 Technologies Used
+
+- **Discord.js** - Discord bot framework
+- **Google Generative AI** - Gemini models for AI
+- **Supabase** - PostgreSQL backend
+- **Node.js** - JavaScript runtime
+- **Docker** - Containerization (optional)
+
+## 🚢 Deployment
+
+### Docker (Recommended)
+
+```bash
+docker-compose up -d
+```
+
+### Manual Deploy
+
+```bash
+npm install
+npm start
+```
+
+### Environment Variables for Production
+
+Set these in your deployment platform:
+```
+DISCORD_BOT_TOKEN=***
+GEMINI_API_KEYS=***
+SUPABASE_URL=https://***
+SUPABASE_KEY=***
+NODE_ENV=production
+LOG_LEVEL=info
+```
+
+## 🤝 Contributing
+
+This is a portfolio project. Feel free to fork and use as a template for your own Discord bot!
+
+## 📝 License
+
+MIT License - See LICENSE file for details
+
+## 🎓 Learning Resources
+
+This project demonstrates:
+- ✅ Discord bot architecture
+- ✅ Prompt engineering and tool calling
+- ✅ Vector embeddings and RAG systems
+- ✅ PostgreSQL and cloud databases
+- ✅ Health checks and monitoring
+- ✅ Environment configuration
+- ✅ Error handling and logging
+- ✅ Async/await patterns
+- ✅ API integration
+
+## 📞 Support
+
+For issues or questions:
+1. Check existing issues on GitHub
+2. Review the troubleshooting section in DEPLOYMENT.md
+3. Check Supabase logs for database errors
+4. Review Discord.js documentation
+
+## 🎯 Next Steps
+
+- Add vector similarity search with pgvector
+- Implement PDF/document upload
+- Add webhook integrations
+- Create admin dashboard
+- Add analytics and insights
+- Multi-language support
+
+---
+
+**Built with ❤️ for the Once Human community**

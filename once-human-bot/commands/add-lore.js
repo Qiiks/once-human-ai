@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const axios = require('axios');
-const RAG_SERVICE_URL = 'http://localhost:5000';
+const { getSupabaseClient } = require('../utils/supabaseClient');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -43,22 +42,29 @@ module.exports = {
             }
             const structuredData = JSON.parse(jsonMatch[0]);
 
-            // 2. Prepare data for the backend service
-            const document = unstructuredText;
-            const metadata = {
-                name: structuredData.name,
-                type: structuredData.type,
-                description: structuredData.description,
-                related_entities: structuredData.related_entities || [],
-                source: `Slash Command by ${interaction.user.username}`,
-                verified: true // Data from this command is considered verified
-            };
+            // 2. Generate embedding using Gemini
+            const embeddingModel = client.keyManager.aI.getGenerativeModel({ model: 'embedding-001' });
+            const embeddingResult = await embeddingModel.embedContent(unstructuredText);
+            const embedding = embeddingResult.embedding.values;
 
-            // 3. Send data to the RAG pipeline backend
-            await axios.post(`${RAG_SERVICE_URL}/add`, {
-                document,
-                metadata
-            });
+            // 3. Insert into PostgreSQL
+            const supabase = getSupabaseClient();
+            const { error } = await supabase
+                .from('lore_entries')
+                .insert({
+                    name: structuredData.name,
+                    type: structuredData.type,
+                    content: unstructuredText,
+                    metadata: {
+                        description: structuredData.description,
+                        related_entities: structuredData.related_entities || [],
+                        source: `Slash Command by ${interaction.user.username}`,
+                        verified: true
+                    },
+                    embedding: JSON.stringify(embedding)
+                });
+
+            if (error) throw error;
 
             await interaction.editReply(`Successfully added new lore: **${structuredData.name}**`);
 

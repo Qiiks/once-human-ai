@@ -594,72 +594,171 @@ User Question: ${originalQuery}`;
 
     async add_data(document, metadata) {
         try {
-            console.log('Sending data to RAG service:', { document, metadata });
-            const response = await this.makeServiceRequest('/add', {
-                document,
-                metadata
-            });
-            if (response.success) {
-                console.log('Successfully added data to RAG service');
-                return response;
-            } else {
-                console.error('RAG service error:', response.error);
-                throw new Error(response.error || 'Unknown error occurred while adding data');
+            console.log('Adding data to PostgreSQL:', { document, metadata });
+            
+            // Get the Google AI instance from keyManager
+            const keyManager = require('./keyManager');
+            const genAI = keyManager.aI;
+            
+            // Generate embedding for the document
+            const embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+            const embeddingResult = await embeddingModel.embedContent(document);
+            const embedding = embeddingResult.embedding.values;
+            
+            // Insert into PostgreSQL
+            const { getSupabaseClient } = require('./supabaseClient');
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from('lore_entries')
+                .insert({
+                    name: metadata.name || 'Unknown',
+                    type: metadata.type || 'Other',
+                    content: document,
+                    metadata: metadata,
+                    embedding: JSON.stringify(embedding)
+                });
+            
+            if (error) {
+                console.error('PostgreSQL insert error:', error);
+                throw error;
             }
+            
+            console.log('Successfully added data to PostgreSQL');
+            return { success: true, data };
         } catch (error) {
-            console.error('Error sending data to RAG service:', error.message);
+            console.error('Error adding data to PostgreSQL:', error.message);
             throw error;
         }
     }
 
     async update_data(id, document, metadata) {
         try {
-            console.log('Sending update to RAG service:', { id, document, metadata });
-            const response = await this.makeServiceRequest('/update', {
-                id,
-                document,
-                metadata
-            });
-            if (response.success) {
-                console.log('Successfully updated data in RAG service');
-                return response;
-            } else {
-                console.error('RAG service error on update:', response.error);
-                throw new Error(response.error || 'Unknown error occurred while updating data');
+            console.log('Updating data in PostgreSQL:', { id, document, metadata });
+            
+            // Get the Google AI instance from keyManager
+            const keyManager = require('./keyManager');
+            const genAI = keyManager.aI;
+            
+            // Generate new embedding for the updated document
+            const embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+            const embeddingResult = await embeddingModel.embedContent(document);
+            const embedding = embeddingResult.embedding.values;
+            
+            // Update in PostgreSQL
+            const { getSupabaseClient } = require('./supabaseClient');
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from('lore_entries')
+                .update({
+                    content: document,
+                    metadata: metadata,
+                    embedding: JSON.stringify(embedding)
+                })
+                .eq('id', id);
+            
+            if (error) {
+                console.error('PostgreSQL update error:', error);
+                throw error;
             }
+            
+            console.log('Successfully updated data in PostgreSQL');
+            return { success: true, data };
         } catch (error) {
-            console.error('Error sending update to RAG service:', error.message);
+            console.error('Error updating lore entry:', error.message);
             throw error;
         }
     }
 
     async checkHealth() {
         try {
-            const response = await this.makeServiceRequest('/health', null, 'GET');
-            return response && response.status === 'healthy';
+            // Check PostgreSQL connection by querying lore_entries
+            const { getSupabaseClient } = require('./supabaseClient');
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from('lore_entries')
+                .select('id')
+                .limit(1);
+            
+            return !error;
         } catch (error) {
-            console.error('RAG service health check failed:', error.message);
+            console.error('Database health check failed:', error.message);
             return false;
         }
     }
 
     async queryDatabase(query, nResults = 5) {
         try {
-            console.log('Querying RAG service with:', { query, nResults });
-            const response = await this.makeServiceRequest('/query', {
-                query,
-                n_results: nResults
-            });
-
-            if (response.success) {
-                console.log(`Retrieved ${response.results.length} results from RAG service`);
-                return response.results;
-            } else {
-                console.error('RAG service error:', response.error);
-                throw new Error(response.error || 'Unknown error occurred');
+            console.log('Querying PostgreSQL database with:', { query, nResults });
+            
+            // Get the Google AI instance from keyManager
+            const keyManager = require('./keyManager');
+            const genAI = keyManager.aI;
+            
+            // Generate embedding for the query using Gemini
+            const embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+            const embeddingResult = await embeddingModel.embedContent(query);
+            const queryEmbedding = embeddingResult.embedding.values;
+            
+            // Get all lore entries from PostgreSQL
+            const { getSupabaseClient } = require('./supabaseClient');
+            const supabase = getSupabaseClient();
+            const { data: entries, error } = await supabase
+                .from('lore_entries')
+                .select('*');
+            
+            if (error) {
+                console.error('PostgreSQL query error:', error);
+                throw error;
             }
+            
+            if (!entries || entries.length === 0) {
+                console.log('No entries found in database');
+                return [];
+            }
+            
+            // Calculate cosine similarity for each entry
+            const results = entries
+                .map(entry => {
+                    // Parse the embedding if it's stored as a string
+                    let embedding;
+                    try {
+                        embedding = typeof entry.embedding === 'string' 
+                            ? JSON.parse(entry.embedding) 
+                            : entry.embedding;
+                    } catch (e) {
+                        console.warn(`Failed to parse embedding for entry ${entry.name}`);
+                        return null;
+                    }
+                    
+                    if (!embedding || !Array.isArray(embedding)) {
+                        return null;
+                    }
+                    
+                    // Calculate cosine similarity
+                    const dotProduct = queryEmbedding.reduce((sum, val, i) => sum + val * embedding[i], 0);
+                    const queryMag = Math.sqrt(queryEmbedding.reduce((sum, val) => sum + val * val, 0));
+                    const entryMag = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+                    const similarity = dotProduct / (queryMag * entryMag);
+                    
+                    // Convert similarity to distance (1 - similarity)
+                    const distance = 1 - similarity;
+                    
+                    return {
+                        document: entry.content,
+                        metadata: entry.metadata,
+                        distance: distance,
+                        id: entry.id
+                    };
+                })
+                .filter(r => r !== null)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, nResults);
+            
+            console.log(`Retrieved ${results.length} results from PostgreSQL`);
+            return results;
+            
         } catch (error) {
-            console.error('Error querying RAG service:', error.message);
+            console.error('Error querying PostgreSQL database:', error.message);
             throw error;
         }
     }
