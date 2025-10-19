@@ -147,10 +147,10 @@ LOG_LEVEL=info
 
 **Example .env (filled):**
 ```properties
-DISCORD_BOT_TOKEN=NzExMjzAjQxYzQ2NjY5NgYwODc4.XjV.7qOHJsdfljsdfkljsdfklj
-GEMINI_API_KEYS=AIzaSyB6zhgnSVhFVU1oG-f6rV19nE8YmaDRiKQ
-SUPABASE_URL=https://xyzabc123.supabase.co
-SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+DISCORD_BOT_TOKEN=
+GEMINI_API_KEYS=
+SUPABASE_URL=
+SUPABASE_KEY=
 NODE_ENV=development
 LOG_LEVEL=info
 ```
