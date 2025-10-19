@@ -7,11 +7,12 @@ A production-ready Discord bot powered by Google Gemini and Supabase, featuring 
 This project demonstrates a complete, scalable Discord bot architecture that combines:
 - **Real-time chat interactions** via Discord.js
 - **Advanced AI generation** using Google Gemini
-- **Integrated RAG pipeline** for context-aware responses
+- **Integrated RAG system** for context-aware responses
 - **Cloud database** with Supabase PostgreSQL
 - **Production-grade health checks** and monitoring
 
-Perfect for portfolios showcasing full-stack bot development, AI integration, and system design.
+Perfect for portfolios showcasing full-stack bot development, AI integration, and system design.  
+All knowledge and memory data is now stored in PostgreSQL via Supabase; no external RAG pipeline or migration scripts remain.
 
 ## 🏗️ Architecture
 
@@ -52,11 +53,11 @@ Perfect for portfolios showcasing full-stack bot development, AI integration, an
    - Manages bot lifecycle and health checks
    - Coordinates between user input and RAG system
 
-2. **Integrated RAG System (integratedRAG.js)**
+2. **Integrated RAG System (localRAG.js)**
    - Processes queries using semantic search
    - Calls Gemini for embeddings and generation
    - Manages tool interactions (add lore, search, save memories)
-   - No external service dependency
+   - All logic is internal; no external service dependency
 
 3. **Supabase Integration (supabaseClient.js)**
    - PostgreSQL database for persistence
@@ -90,12 +91,7 @@ cd once-human-ai/once-human-bot
 npm install
 ```
 
-3. **Set up Supabase**
-   - Create a new Supabase project at https://supabase.com
-   - Copy your project URL and anon key
-   - Run the migration SQL (see Setup section below)
-
-4. **Configure environment**
+3. **Configure environment**
 ```bash
 cp .env.example .env
 # Edit .env with your credentials:
@@ -105,7 +101,7 @@ cp .env.example .env
 # - SUPABASE_KEY
 ```
 
-5. **Run the bot**
+4. **Run the bot**
 ```bash
 npm start
 ```
@@ -114,19 +110,7 @@ npm start
 
 ### Database Setup
 
-Run the SQL migration in your Supabase project:
-
-```sql
--- Navigate to Supabase SQL Editor and run:
--- File: supabase_migration.sql
-```
-
-This creates:
-- `memories` table - User memories and preferences
-- `lore_entries` table - Game knowledge base
-- `chat_history` table - Conversation tracking
-- Proper indexes for performance
-- Row-level security policies
+All required tables (`memories`, `lore_entries`, `chat_history`) are now managed in Supabase PostgreSQL. No migration scripts or legacy data folders remain. Simply create a new Supabase project and configure your credentials.
 
 ### Discord Server Setup
 
@@ -156,17 +140,13 @@ once-human-bot/
 │   ├── messageCreate.js  # Message handling
 │   └── interactionCreate.js
 ├── utils/
-│   ├── integratedRAG.js  # RAG system core
+│   ├── localRAG.js       # RAG system core
 │   ├── supabaseClient.js # Database connection
 │   ├── memoryManager.js  # User memories
 │   ├── keyManager.js     # API key rotation
 │   └── ...
 ├── index.js              # Bot entry point
 └── package.json
-
-rag_pipeline/            # Legacy (for data migration)
-├── chroma_db/          # ChromaDB data (migrate to Supabase)
-└── ...
 
 OncehumanPDFs/          # Knowledge base source documents
 ```
@@ -263,33 +243,7 @@ curl http://localhost:3000/metrics
 
 ## 🔄 Data Migration
 
-### From ChromaDB to Supabase
-
-The `rag_pipeline/chroma_db/` directory contains your existing vector data. To migrate:
-
-1. Export from ChromaDB:
-```python
-import chromadb
-client = chromadb.PersistentClient(path='./rag_pipeline/chroma_db')
-collection = client.get_collection('once_human_knowledge')
-```
-
-2. Import to Supabase:
-```javascript
-// Use the RAG system to add each entry
-for (const entry of exported_entries) {
-    await ragSystem.add_lore_tool({
-        entry_name: entry.name,
-        entry_type: entry.type,
-        description: entry.content
-    }, message, client);
-}
-```
-
-Existing database files are preserved in:
-- `rag_pipeline/chroma_db/` - ChromaDB data
-- `rag_pipeline/backupppp/` - Backup copies
-- `chroma.sqlite3` - SQLite memory database
+All migration steps are complete. The bot now uses only Supabase PostgreSQL for all data storage. No legacy folders or migration scripts remain in the codebase.
 
 ## 🎨 Features Showcase
 
